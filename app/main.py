@@ -66,6 +66,8 @@ async def twitch_auth_start(request: Request) -> Response:
             response = RedirectResponse(request.app.state.twitch.authorization_url(state))
             # OAuth returns to this same browser/host, so the state remains scoped to it.
             response.set_cookie("twitch_oauth_state", state, max_age=600, httponly=True, samesite="lax")
+            response.headers["Cache-Control"] = "no-store, max-age=0"
+            response.headers["Pragma"] = "no-cache"
             return response
         device = await request.app.state.twitch.start_device_authorization()
         device["next_poll_at"] = time.monotonic() + int(device.get("interval", 5))
