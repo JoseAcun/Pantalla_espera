@@ -1,5 +1,6 @@
 import logging
 import time
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -31,6 +32,7 @@ async def lifespan(app: FastAPI):
     app.state.stream_state = StreamStateStore(initial_state())
     app.state.connections = OverlayConnections()
     app.state.twitch = TwitchClient(get_settings())
+    app.state.oauth_states = {}
     app.state.eventsub = EventSubClient(app.state.twitch, app.state.stream_state, app.state.connections.broadcast)
     logger.info("Overlay backend started. Open /auth/twitch/start to connect Twitch.")
     yield
@@ -54,6 +56,11 @@ async def get_state() -> StreamState:
 @app.get("/auth/twitch/start", include_in_schema=False)
 async def twitch_auth_start(request: Request) -> Response:
     state = create_oauth_state()
+    now = time.monotonic()
+    request.app.state.oauth_states = {
+        value: expires_at for value, expires_at in request.app.state.oauth_states.items() if expires_at > now
+    }
+    request.app.state.oauth_states[state] = now + 600
     try:
         if request.app.state.twitch.settings.twitch_client_secret:
             response = RedirectResponse(request.app.state.twitch.authorization_url(state))
@@ -99,8 +106,11 @@ async def twitch_auth_callback(request: Request, code: str | None = None, state:
     if error:
         raise HTTPException(status_code=400, detail=f"Twitch rechazó la autorización: {error}")
     expected_state = request.cookies.get("twitch_oauth_state")
-    if not code or not state or not expected_state or state != expected_state:
-        raise HTTPException(status_code=400, detail="Respuesta OAuth inválida. Abre /auth/twitch/start usando exactamente el mismo host y puerto configurados como redirect URI.")
+    state_expires_at = request.app.state.oauth_states.pop(state, 0) if state else 0
+    valid_server_state = state_expires_at > time.monotonic()
+    valid_cookie_state = bool(expected_state and state and state == expected_state)
+    if not code or not state or not (valid_server_state or valid_cookie_state):
+        raise HTTPException(status_code=400, detail="Respuesta OAuth inválida o expirada. Reinicia el flujo en /auth/twitch/start.")
     try:
         await request.app.state.twitch.exchange_code(code)
         stream_state = await request.app.state.twitch.hydrate_state()
