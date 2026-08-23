@@ -158,9 +158,9 @@ En `.env` usa la IP reservada o hostname de la Pi en `TWITCH_REDIRECT_URI`, y re
 TWITCH_REDIRECT_URI=http://192.168.1.50:8000/auth/twitch/callback
 ```
 
-Desde un equipo de la misma red abre `http://192.168.1.50:8000/auth/twitch/start` y completa OAuth. El volumen `twitch-overlay-data` conserva el token fuera del contenedor.
+Desde un equipo de la misma red abre `http://192.168.1.50:8010/auth/twitch/start` y completa OAuth. El volumen `twitch-overlay-data` conserva el token fuera del contenedor. Usa el mismo host y puerto tanto para abrir esta URL como en `TWITCH_REDIRECT_URI`; no alternes entre IP, hostname o `localhost` durante el flujo.
 
-Para OBS, usa `http://192.168.1.50:8000/overlay/brb` como Browser Source. No expongas el puerto 8000 a Internet.
+Para OBS, usa `http://192.168.1.50:8010/overlay/brb` como Browser Source. No expongas el puerto publicado a Internet.
 
 ### Actualizar desde GitHub
 

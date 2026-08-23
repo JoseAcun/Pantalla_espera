@@ -31,7 +31,6 @@ async def lifespan(app: FastAPI):
     app.state.stream_state = StreamStateStore(initial_state())
     app.state.connections = OverlayConnections()
     app.state.twitch = TwitchClient(get_settings())
-    app.state.oauth_state = None
     app.state.eventsub = EventSubClient(app.state.twitch, app.state.stream_state, app.state.connections.broadcast)
     logger.info("Overlay backend started. Open /auth/twitch/start to connect Twitch.")
     yield
@@ -55,10 +54,12 @@ async def get_state() -> StreamState:
 @app.get("/auth/twitch/start", include_in_schema=False)
 async def twitch_auth_start(request: Request) -> Response:
     state = create_oauth_state()
-    request.app.state.oauth_state = state
     try:
         if request.app.state.twitch.settings.twitch_client_secret:
-            return RedirectResponse(request.app.state.twitch.authorization_url(state))
+            response = RedirectResponse(request.app.state.twitch.authorization_url(state))
+            # OAuth returns to this same browser/host, so the state remains scoped to it.
+            response.set_cookie("twitch_oauth_state", state, max_age=600, httponly=True, samesite="lax")
+            return response
         device = await request.app.state.twitch.start_device_authorization()
         device["next_poll_at"] = time.monotonic() + int(device.get("interval", 5))
         request.app.state.device_authorization = device
@@ -97,8 +98,9 @@ async def twitch_auth_poll(request: Request) -> dict[str, object]:
 async def twitch_auth_callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None) -> HTMLResponse:
     if error:
         raise HTTPException(status_code=400, detail=f"Twitch rechazó la autorización: {error}")
-    if not code or not state or state != request.app.state.oauth_state:
-        raise HTTPException(status_code=400, detail="Respuesta OAuth inválida; vuelve a iniciar la autorización.")
+    expected_state = request.cookies.get("twitch_oauth_state")
+    if not code or not state or not expected_state or state != expected_state:
+        raise HTTPException(status_code=400, detail="Respuesta OAuth inválida. Abre /auth/twitch/start usando exactamente el mismo host y puerto configurados como redirect URI.")
     try:
         await request.app.state.twitch.exchange_code(code)
         stream_state = await request.app.state.twitch.hydrate_state()
@@ -110,8 +112,9 @@ async def twitch_auth_callback(request: Request, code: str | None = None, state:
     except Exception:
         logger.exception("Fallo inesperado sincronizando Twitch después de OAuth")
         raise HTTPException(status_code=500, detail="Error interno al sincronizar Twitch; revisa la consola del backend.")
-    request.app.state.oauth_state = None
-    return HTMLResponse("<h1>Twitch conectado</h1><p>Ya puedes cerrar esta pestaña y volver a OBS.</p>")
+    response = HTMLResponse("<h1>Twitch conectado</h1><p>Ya puedes cerrar esta pestaña y volver a OBS.</p>")
+    response.delete_cookie("twitch_oauth_state")
+    return response
 
 
 @app.get("/api/twitch/status")
