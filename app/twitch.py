@@ -16,7 +16,6 @@ TOKEN_URL = "https://id.twitch.tv/oauth2/token"
 AUTHORIZE_URL = "https://id.twitch.tv/oauth2/authorize"
 VALIDATE_URL = "https://id.twitch.tv/oauth2/validate"
 HELIX_URL = "https://api.twitch.tv/helix"
-TOKEN_FILE = Path(".twitch_tokens.json")
 REQUIRED_SCOPES = ("moderator:read:followers", "channel:read:subscriptions", "bits:read")
 
 
@@ -27,19 +26,23 @@ class TwitchError(RuntimeError):
 class TokenStore:
     """Small local store for tokens returned by OAuth; excluded from Git."""
 
+    def __init__(self, path: str) -> None:
+        self.path = Path(path)
+
     def load(self) -> dict[str, Any]:
-        if not TOKEN_FILE.exists():
+        if not self.path.exists():
             return {}
-        return json.loads(TOKEN_FILE.read_text(encoding="utf-8"))
+        return json.loads(self.path.read_text(encoding="utf-8"))
 
     def save(self, tokens: dict[str, Any]) -> None:
-        TOKEN_FILE.write_text(json.dumps(tokens, indent=2), encoding="utf-8")
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps(tokens, indent=2), encoding="utf-8")
 
 
 class TwitchClient:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.tokens = TokenStore()
+        self.tokens = TokenStore(settings.twitch_token_file)
 
     def is_configured(self) -> bool:
         return bool(self.settings.twitch_client_id)

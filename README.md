@@ -73,3 +73,100 @@ Twitch puede reenviar una notificación, y los eventos ocurridos durante una des
 ## Pruebas
 
 Sin credenciales el proyecto funciona en modo demo: abre el overlay y verifica que el indicador cambia a `LOCAL ONLINE`, que recibe el estado inicial y que la animación se repite. La API de estado está disponible en `GET /api/state`.
+
+## Despliegue en Raspberry Pi
+
+El backend puede vivir en una Raspberry Pi dentro de tu red local; OBS se conecta a ella por IP o nombre de host. No expongas el puerto 8000 a Internet ni hagas port-forwarding en el router.
+
+### Preparar la Pi
+
+En Raspberry Pi OS, conéctate por SSH y ejecuta lo siguiente como tu usuario normal (sustituye la URL del repositorio):
+
+```bash
+sudo apt update
+sudo apt full-upgrade
+sudo apt install -y git python3-venv python3-pip
+git clone https://github.com/TU_USUARIO/TU_REPOSITORIO.git ~/stream-overlay
+cd ~/stream-overlay
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+cp .env.example .env
+chmod 600 .env
+```
+
+Edita `.env` y añade `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET` y los valores manuales. Usa una IP reservada en el router o un hostname estable, por ejemplo `stream-overlay.local`. Para realizar OAuth desde otro equipo de tu LAN, registra en Twitch y en `TWITCH_REDIRECT_URI` exactamente la misma URL, por ejemplo:
+
+```env
+TWITCH_REDIRECT_URI=http://stream-overlay.local:8000/auth/twitch/callback
+```
+
+Después abre `http://stream-overlay.local:8000/auth/twitch/start` desde un navegador de tu red y autoriza Twitch. Si mDNS no funciona en tu red, usa la IP obtenida con `hostname -I` en su lugar y regístrala exactamente igual en Twitch.
+
+### Servicio automático
+
+Instala la unidad incluida y arráncala con tu usuario actual:
+
+```bash
+cd ~/stream-overlay
+sudo cp deploy/stream-overlay@.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now stream-overlay@$USER.service
+sudo systemctl status stream-overlay@$USER.service
+```
+
+El servicio arranca tras reinicios y reinicia automáticamente si falla. Para ver registros:
+
+```bash
+journalctl -u stream-overlay@$USER.service -f
+```
+
+### OBS y actualizaciones
+
+Desde el equipo donde ejecutas OBS, usa `http://stream-overlay.local:8000/overlay/brb` (o la IP de la Pi) como URL de Browser Source. Configura 1920×1080 y activa **Control audio via OBS** si quieres que OBS mezcle la música.
+
+Para publicar una actualización desde GitHub en la Pi:
+
+```bash
+cd ~/stream-overlay
+bash deploy/update-on-pi.sh
+```
+
+El script usa `git pull --ff-only`, actualiza dependencias y reinicia el servicio. Tus archivos `.env` y `.twitch_tokens.json` no se modifican ni se suben al repositorio.
+
+## Despliegue recomendado: Docker Compose en Raspberry Pi
+
+Esta es la opción recomendada para la Pi. La imagen contiene el código y dependencias; `.env` se queda en la Pi y un volumen Docker persistente conserva los tokens de Twitch al actualizar o recrear el contenedor.
+
+### Instalar Docker y arrancar
+
+Instala Docker Engine y el plugin Compose siguiendo la guía oficial de Docker para tu edición de Raspberry Pi OS. Luego clona tu repositorio y ejecuta:
+
+```bash
+git clone https://github.com/TU_USUARIO/TU_REPOSITORIO.git ~/stream-overlay
+cd ~/stream-overlay
+cp .env.example .env
+chmod 600 .env
+nano .env
+docker compose up --build --detach
+docker compose ps
+docker compose logs --follow
+```
+
+En `.env` usa la IP reservada o hostname de la Pi en `TWITCH_REDIRECT_URI`, y registra exactamente esa misma URL en Twitch. Por ejemplo, si la IP de la Pi es `192.168.1.50`:
+
+```env
+TWITCH_REDIRECT_URI=http://192.168.1.50:8000/auth/twitch/callback
+```
+
+Desde un equipo de la misma red abre `http://192.168.1.50:8000/auth/twitch/start` y completa OAuth. El volumen `twitch-overlay-data` conserva el token fuera del contenedor.
+
+Para OBS, usa `http://192.168.1.50:8000/overlay/brb` como Browser Source. No expongas el puerto 8000 a Internet.
+
+### Actualizar desde GitHub
+
+```bash
+cd ~/stream-overlay
+bash deploy/docker-update-on-pi.sh
+```
+
+El comando descarga únicamente actualizaciones fast-forward, reconstruye la imagen y recrea el contenedor. La política `unless-stopped` hace que vuelva a iniciar tras un reinicio de la Pi.

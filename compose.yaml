@@ -1,0 +1,20 @@
+name: twitch-stream-overlay
+
+services:
+  overlay:
+    build: .
+    env_file:
+      - .env
+    environment:
+      TWITCH_TOKEN_FILE: /data/twitch_tokens.json
+    ports:
+      - "8000:8000"
+    volumes:
+      - twitch-overlay-data:/data
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+
+volumes:
+  twitch-overlay-data:
