@@ -156,7 +156,28 @@ class TwitchClient:
             episode=self.settings.overlay_episode,
             custom_message=self.settings.overlay_custom_message,
             is_live=bool(stream),
+            viewer_count=stream.get("viewer_count", 0),
+            stream_started_at=stream.get("started_at"),
         )
+
+    async def refresh_live_metrics(self, current: StreamState) -> StreamState:
+        """Refresh data that changes during a broadcast without discarding EventSub state."""
+        validation = await self.validate_or_refresh()
+        broadcaster_id = self.settings.twitch_broadcaster_id or validation["user_id"]
+        headers = {"Client-Id": self.settings.twitch_client_id or "", "Authorization": f"Bearer {self.access_token()}"}
+        async with httpx.AsyncClient(timeout=15, headers=headers) as client:
+            response = await client.get(f"{HELIX_URL}/streams", params={"user_id": broadcaster_id})
+        if response.is_error:
+            raise TwitchError(f"Helix rechazó /streams ({response.status_code}).")
+        streams = response.json().get("data", [])
+        stream = streams[0] if streams else {}
+        return current.model_copy(update={
+            "is_live": bool(stream),
+            "viewer_count": stream.get("viewer_count", 0),
+            "stream_started_at": stream.get("started_at"),
+            "game": stream.get("game_name") or current.game,
+            "category": stream.get("game_name") or current.category,
+        })
 
     async def create_eventsub_subscription(self, event_type: str, version: str, condition: dict[str, str], session_id: str) -> None:
         """Create an EventSub subscription tied to Twitch's EventSub WebSocket."""

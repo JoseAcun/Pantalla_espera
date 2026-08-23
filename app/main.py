@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import logging
 import time
 import time
@@ -18,6 +20,21 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logger = logging.getLogger(__name__)
 
 
+async def refresh_metrics_periodically(app: FastAPI) -> None:
+    """Poll the small live-metrics subset of Helix once a minute."""
+    while True:
+        await asyncio.sleep(60)
+        if not app.state.twitch.access_token():
+            continue
+        try:
+            current = await app.state.stream_state.get()
+            refreshed = await app.state.twitch.refresh_live_metrics(current)
+            await app.state.stream_state.replace(refreshed)
+            await app.state.connections.broadcast({"type": "stream_state", "data": refreshed.model_dump(mode="json")})
+        except Exception as error:
+            logger.warning("Could not refresh live metrics: %s", error)
+
+
 def initial_state() -> StreamState:
     settings = get_settings()
     return StreamState(
@@ -34,8 +51,12 @@ async def lifespan(app: FastAPI):
     app.state.twitch = TwitchClient(get_settings())
     app.state.oauth_states = {}
     app.state.eventsub = EventSubClient(app.state.twitch, app.state.stream_state, app.state.connections.broadcast)
+    app.state.metrics_task = asyncio.create_task(refresh_metrics_periodically(app), name="twitch-live-metrics")
     logger.info("Overlay backend started. Open /auth/twitch/start to connect Twitch.")
     yield
+    app.state.metrics_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await app.state.metrics_task
     await app.state.eventsub.stop()
 
 

@@ -48,6 +48,8 @@ Tras autorizar, el backend consulta Helix (`users`, `channels` y `streams`) y ac
 
 La escena BRB muestra los últimos follow, sub, cheer y raid que EventSub reciba mientras el backend está conectado. Hasta el primer evento de cada tipo verá `WAITING FOR SIGNAL`.
 
+También muestra viewers actuales y duración del directo. La duración se calcula localmente desde la hora de inicio informada por Helix; el backend actualiza los viewers una vez por minuto.
+
 ## OBS
 
 En OBS crea una **Browser Source** con la URL `http://localhost:8000/overlay/brb`. El overlay ocupa todo el lienzo de la fuente: configura **1920×1080** para stream 16:9 (o exactamente la resolución de tu lienzo) y deja activado "Refresh browser when scene becomes active" si quieres reiniciar la animación al entrar a la escena.

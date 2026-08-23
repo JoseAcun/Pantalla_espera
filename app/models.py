@@ -41,6 +41,8 @@ class StreamState(BaseModel):
     episode: str = ""
     custom_message: str = ""
     is_live: bool = False
+    viewer_count: int = 0
+    stream_started_at: datetime | None = None
     last_follower: FollowEvent = Field(default_factory=FollowEvent)
     last_subscriber: SubscriptionEvent = Field(default_factory=SubscriptionEvent)
     last_cheer: CheerEvent = Field(default_factory=CheerEvent)
