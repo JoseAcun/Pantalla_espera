@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BRB Overlay</title>
+    <link rel="stylesheet" href="/static/brb/styles.css" />
+  </head>
+  <body>
+    <main class="terminal" aria-label="Pantalla vuelvo pronto">
+      <header><span>STREAM_OS v0.1</span><span id="connection">CONNECTING</span></header>
+      <section class="content">
+        <p class="command">&gt; status</p>
+        <dl>
+          <div><dt>STREAMER</dt><dd id="streamer">—</dd></div>
+          <div><dt>STREAM</dt><dd id="stream-status">AFK</dd></div>
+          <div><dt>GAME</dt><dd id="game">—</dd></div>
+          <div><dt>EPISODE</dt><dd id="episode">—</dd></div>
+        </dl>
+        <section class="events" aria-label="Últimos eventos del canal">
+          <p class="section-label">&gt; recent_channel_events</p>
+          <dl>
+            <div><dt>LAST FOLLOW</dt><dd id="last-follower">WAITING FOR SIGNAL</dd></div>
+            <div><dt>LAST SUB</dt><dd id="last-subscriber">WAITING FOR SIGNAL</dd></div>
+            <div><dt>LAST CHEER</dt><dd id="last-cheer">WAITING FOR SIGNAL</dd></div>
+            <div><dt>LAST RAID</dt><dd id="last-raid">WAITING FOR SIGNAL</dd></div>
+          </dl>
+        </section>
+        <p class="command" id="typed-command"></p>
+        <p class="message" id="message">Searching for streamer...</p>
+        <div class="progress" aria-label="Progreso"><div id="progress-bar"></div></div>
+        <p class="prompt">&gt; <span class="cursor">_</span></p>
+      </section>
+    </main>
+    <audio id="brb-theme" src="/static/audio/djartmusic-the-return-of-the-8-bit-era-301292.mp3" autoplay loop preload="auto"></audio>
+    <script src="/static/brb/app.js"></script>
+  </body>
+</html>

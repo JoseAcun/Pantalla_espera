@@ -1,0 +1,14 @@
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body { width: 100%; height: 100%; }
+body { margin: 0; overflow: hidden; background: #030a06; color: #83ffac; font: clamp(17px, 1.6vw, 30px)/1.28 "Courier New", monospace; text-shadow: 0 0 7px #28a951; }
+.terminal { width: 100vw; height: 100vh; overflow: hidden; border: 3px solid currentColor; box-shadow: inset 0 0 35px #0c602b, 0 0 35px #0c602b; background: linear-gradient(#06130aee, #020603ee); }
+header { display: flex; justify-content: space-between; padding: .35em .8em; border-bottom: 2px solid currentColor; }
+#connection { color: #e8ff84; font-size: .75em; }
+.content { padding: .8em 1.4em; }
+p { margin: .3em 0; } .command { color: #d1ffdf; } .message { min-height: 1.25em; color: #e8ff84; }
+dl { margin: .65em 0; } dl div { display: flex; gap: .8em; } dt { width: 10ch; flex: 0 0 auto; } dt::after { content: ":"; } dd { margin: 0; color: #e4ffe9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.events { border-top: 1px dashed #83ffac99; border-bottom: 1px dashed #83ffac99; margin: .5em 0; padding: .35em 0; } .section-label { color: #d1ffdf; font-size: .85em; } .events dl { font-size: .8em; margin: .35em 0 0; } .events dt { width: 13ch; }
+.progress { width: min(100%, 27em); height: .75em; border: 2px solid currentColor; padding: .08em; } #progress-bar { height: 100%; width: 0%; background: currentColor; box-shadow: 0 0 13px currentColor; transition: width .12s linear; }
+.cursor { animation: blink .85s steps(2, jump-none) infinite; } @keyframes blink { 50% { opacity: 0; } }
+body::after { content: ""; position: fixed; inset: 0; pointer-events: none; background: repeating-linear-gradient(0deg, #0000 0 3px, #0004 4px); opacity: .24; }

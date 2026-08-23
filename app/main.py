@@ -1,0 +1,157 @@
+import logging
+import time
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
+
+from app.config import get_settings
+from app.eventsub import EventSubClient
+from app.models import StreamState
+from app.state import StreamStateStore
+from app.twitch import TwitchClient, TwitchError, create_oauth_state
+from app.websocket import OverlayConnections
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logger = logging.getLogger(__name__)
+
+
+def initial_state() -> StreamState:
+    settings = get_settings()
+    return StreamState(
+        status=settings.overlay_status,
+        episode=settings.overlay_episode,
+        custom_message=settings.overlay_custom_message,
+    )
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    app.state.stream_state = StreamStateStore(initial_state())
+    app.state.connections = OverlayConnections()
+    app.state.twitch = TwitchClient(get_settings())
+    app.state.oauth_state = None
+    app.state.eventsub = EventSubClient(app.state.twitch, app.state.stream_state, app.state.connections.broadcast)
+    logger.info("Overlay backend started. Open /auth/twitch/start to connect Twitch.")
+    yield
+    await app.state.eventsub.stop()
+
+
+app = FastAPI(title="Twitch Stream Overlay", lifespan=lifespan)
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+
+@app.get("/health")
+async def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.get("/api/state", response_model=StreamState)
+async def get_state() -> StreamState:
+    return await app.state.stream_state.get()
+
+
+@app.get("/auth/twitch/start", include_in_schema=False)
+async def twitch_auth_start(request: Request) -> Response:
+    state = create_oauth_state()
+    request.app.state.oauth_state = state
+    try:
+        if request.app.state.twitch.settings.twitch_client_secret:
+            return RedirectResponse(request.app.state.twitch.authorization_url(state))
+        device = await request.app.state.twitch.start_device_authorization()
+        device["next_poll_at"] = time.monotonic() + int(device.get("interval", 5))
+        request.app.state.device_authorization = device
+        return HTMLResponse(f'''<!doctype html><title>Conectar Twitch</title><h1>Conectar Twitch</h1>
+<p>Abre <a href="{device["verification_uri"]}" target="_blank">Twitch Activate</a> y escribe este código:</p>
+<h2>{device["user_code"]}</h2><p id="status">Esperando autorización…</p>
+<script>setInterval(async()=>{{let r=await fetch('/auth/twitch/poll');let j=await r.json();document.querySelector('#status').textContent=j.message;if(j.connected) location.href='/overlay/brb';}}, {int(device.get("interval", 5)) * 1000});</script>''')
+    except TwitchError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+
+
+@app.get("/auth/twitch/poll")
+async def twitch_auth_poll(request: Request) -> dict[str, object]:
+    device = getattr(request.app.state, "device_authorization", None)
+    if not device:
+        raise HTTPException(status_code=400, detail="No hay una autorización de dispositivo activa.")
+    try:
+        if time.monotonic() < device["next_poll_at"]:
+            return {"connected": False, "message": "Esperando autorización en Twitch…"}
+        device["next_poll_at"] = time.monotonic() + int(device.get("interval", 5))
+        tokens = await request.app.state.twitch.exchange_device_code(device["device_code"])
+        if tokens is None:
+            return {"connected": False, "message": "Esperando autorización en Twitch…"}
+        stream_state = await request.app.state.twitch.hydrate_state()
+        await request.app.state.stream_state.replace(stream_state)
+        await request.app.state.connections.broadcast({"type": "stream_state", "data": stream_state.model_dump(mode="json")})
+        request.app.state.eventsub.start()
+        request.app.state.device_authorization = None
+        return {"connected": True, "message": "Twitch conectado."}
+    except TwitchError as error:
+        request.app.state.device_authorization = None
+        return {"connected": False, "message": str(error)}
+
+
+@app.get("/auth/twitch/callback", include_in_schema=False)
+async def twitch_auth_callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None) -> HTMLResponse:
+    if error:
+        raise HTTPException(status_code=400, detail=f"Twitch rechazó la autorización: {error}")
+    if not code or not state or state != request.app.state.oauth_state:
+        raise HTTPException(status_code=400, detail="Respuesta OAuth inválida; vuelve a iniciar la autorización.")
+    try:
+        await request.app.state.twitch.exchange_code(code)
+        stream_state = await request.app.state.twitch.hydrate_state()
+        await request.app.state.stream_state.replace(stream_state)
+        await request.app.state.connections.broadcast({"type": "stream_state", "data": stream_state.model_dump(mode="json")})
+        request.app.state.eventsub.start()
+    except TwitchError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception:
+        logger.exception("Fallo inesperado sincronizando Twitch después de OAuth")
+        raise HTTPException(status_code=500, detail="Error interno al sincronizar Twitch; revisa la consola del backend.")
+    request.app.state.oauth_state = None
+    return HTMLResponse("<h1>Twitch conectado</h1><p>Ya puedes cerrar esta pestaña y volver a OBS.</p>")
+
+
+@app.get("/api/twitch/status")
+async def twitch_status(request: Request) -> dict:
+    client: TwitchClient = request.app.state.twitch
+    if not client.is_configured():
+        return {"connected": False, "reason": "Faltan credenciales de la aplicación en .env."}
+    try:
+        token = await client.validate_or_refresh()
+    except TwitchError as error:
+        return {"connected": False, "reason": str(error)}
+    return {"connected": True, "eventsub_connected": request.app.state.eventsub.connected, "login": token["login"], "user_id": token["user_id"], "scopes": token.get("scopes", [])}
+
+
+@app.post("/api/twitch/sync", response_model=StreamState)
+async def twitch_sync(request: Request) -> StreamState:
+    try:
+        state = await request.app.state.twitch.hydrate_state()
+    except TwitchError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    await request.app.state.stream_state.replace(state)
+    await request.app.state.connections.broadcast({"type": "stream_state", "data": state.model_dump(mode="json")})
+    return state
+
+
+@app.get("/overlay/brb", include_in_schema=False)
+async def brb_overlay() -> FileResponse:
+    return FileResponse("app/static/brb/index.html")
+
+
+@app.websocket("/ws/overlay")
+async def overlay_socket(websocket: WebSocket) -> None:
+    connections: OverlayConnections = app.state.connections
+    await connections.connect(websocket)
+    try:
+        state = await app.state.stream_state.get()
+        await websocket.send_json({"type": "stream_state", "data": state.model_dump(mode="json")})
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await connections.disconnect(websocket)
