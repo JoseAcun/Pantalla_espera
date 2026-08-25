@@ -50,6 +50,10 @@ La escena BRB muestra los últimos follow, sub, cheer y raid que EventSub reciba
 
 También muestra viewers actuales y duración del directo. La duración se calcula localmente desde la hora de inicio informada por Helix; el backend actualiza los viewers una vez por minuto.
 
+### Persistencia opcional con MariaDB
+
+Si defines `DATABASE_URL`, el backend crea la tabla `twitch_events` al iniciar y guarda follows, subs, cheers y raids. Al reiniciar, restaura el último evento de cada tipo y evita duplicados de EventSub mediante el identificador de mensaje. Además, Helix consulta el último follow existente al conectar, aunque haya ocurrido antes de arrancar el backend.
+
 ## OBS
 
 En OBS crea una **Browser Source** con la URL `http://localhost:8000/overlay/brb`. El overlay ocupa todo el lienzo de la fuente: configura **1920×1080** para stream 16:9 (o exactamente la resolución de tu lienzo) y deja activado "Refresh browser when scene becomes active" si quieres reiniciar la animación al entrar a la escena.

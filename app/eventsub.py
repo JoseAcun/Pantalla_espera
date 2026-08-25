@@ -10,6 +10,7 @@ from typing import Awaitable, Callable
 import websockets
 
 from app.models import CheerEvent, FollowEvent, RaidEvent, StreamState, SubscriptionEvent
+from app.database import EventRepository
 from app.state import StreamStateStore
 from app.twitch import TwitchClient, TwitchError
 
@@ -18,8 +19,9 @@ EVENTSUB_URL = "wss://eventsub.wss.twitch.tv/ws"
 
 
 class EventSubClient:
-    def __init__(self, twitch: TwitchClient, state: StreamStateStore, publish: Callable[[dict], Awaitable[None]]) -> None:
+    def __init__(self, twitch: TwitchClient, state: StreamStateStore, publish: Callable[[dict], Awaitable[None]], repository: EventRepository | None = None) -> None:
         self.twitch, self.state, self.publish = twitch, state, publish
+        self.repository = repository
         self.task: asyncio.Task | None = None
         self.connected = False
 
@@ -80,7 +82,27 @@ class EventSubClient:
     async def _handle(self, message: dict) -> None:
         event_type = message["metadata"]["subscription_type"]
         event = message["payload"]["event"]
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(timezone.utc)
+        if self.repository:
+            is_new = await asyncio.to_thread(
+                self.repository.save,
+                message["metadata"]["message_id"],
+                event_type,
+                event,
+                now,
+            )
+            if not is_new:
+                return
+        changes, data = self._event_changes(event_type, event, now)
+        if not changes:
+            return
+        stream_state = await self.state.update(**changes)
+        await self.publish({"type": "event", "event": event_type.removeprefix("channel."), "data": data})
+        await self.publish({"type": "stream_state", "data": stream_state.model_dump(mode="json")})
+
+    @staticmethod
+    def _event_changes(event_type: str, event: dict, received_at: datetime) -> tuple[dict[str, object], dict[str, object]]:
+        now = received_at.isoformat()
         changes: dict[str, object] = {}
         data: dict[str, object]
         if event_type == "channel.follow":
@@ -99,7 +121,15 @@ class EventSubClient:
             data = {"title": event["title"], "category": event.get("category_name", "")}
             changes.update(game=event.get("category_name", "NO GAME SELECTED"), category=event.get("category_name", ""))
         else:
+            return {}, {}
+        return changes, data
+
+    async def restore_from_repository(self) -> None:
+        if not self.repository:
             return
-        stream_state = await self.state.update(**changes)
-        await self.publish({"type": "event", "event": event_type.removeprefix("channel."), "data": data})
-        await self.publish({"type": "stream_state", "data": stream_state.model_dump(mode="json")})
+        latest = await asyncio.to_thread(self.repository.latest_events)
+        restored = await self.state.get()
+        for event_type, event, occurred_at in latest:
+            changes, _ = self._event_changes(event_type, event, occurred_at)
+            restored = restored.model_copy(update=changes)
+        await self.state.replace(restored)

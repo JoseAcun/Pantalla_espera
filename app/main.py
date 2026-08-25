@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
 from app.eventsub import EventSubClient
+from app.database import EventRepository
 from app.models import StreamState
 from app.state import StreamStateStore
 from app.twitch import TwitchClient, TwitchError, create_oauth_state
@@ -50,7 +51,20 @@ async def lifespan(app: FastAPI):
     app.state.connections = OverlayConnections()
     app.state.twitch = TwitchClient(get_settings())
     app.state.oauth_states = {}
-    app.state.eventsub = EventSubClient(app.state.twitch, app.state.stream_state, app.state.connections.broadcast)
+    database_url = get_settings().database_url
+    app.state.repository = EventRepository(database_url) if database_url else None
+    if app.state.repository:
+        await asyncio.to_thread(app.state.repository.initialize)
+        logger.info("MariaDB event persistence enabled")
+    app.state.eventsub = EventSubClient(app.state.twitch, app.state.stream_state, app.state.connections.broadcast, app.state.repository)
+    if app.state.twitch.access_token():
+        try:
+            hydrated = await app.state.twitch.hydrate_state()
+            await app.state.stream_state.replace(hydrated)
+            app.state.eventsub.start()
+        except Exception as error:
+            logger.warning("Could not restore Twitch state at startup: %s", error)
+    await app.state.eventsub.restore_from_repository()
     app.state.metrics_task = asyncio.create_task(refresh_metrics_periodically(app), name="twitch-live-metrics")
     logger.info("Overlay backend started. Open /auth/twitch/start to connect Twitch.")
     yield
@@ -115,6 +129,7 @@ async def twitch_auth_poll(request: Request) -> dict[str, object]:
             return {"connected": False, "message": "Esperando autorización en Twitch…"}
         stream_state = await request.app.state.twitch.hydrate_state()
         await request.app.state.stream_state.replace(stream_state)
+        await request.app.state.eventsub.restore_from_repository()
         await request.app.state.connections.broadcast({"type": "stream_state", "data": stream_state.model_dump(mode="json")})
         request.app.state.eventsub.start()
         request.app.state.device_authorization = None

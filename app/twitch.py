@@ -10,7 +10,7 @@ from urllib.parse import urlencode
 import httpx
 
 from app.config import Settings
-from app.models import StreamState
+from app.models import FollowEvent, StreamState
 
 TOKEN_URL = "https://id.twitch.tv/oauth2/token"
 AUTHORIZE_URL = "https://id.twitch.tv/oauth2/authorize"
@@ -144,10 +144,11 @@ class TwitchClient:
         broadcaster_id = self.settings.twitch_broadcaster_id or validation["user_id"]
         headers = {"Client-Id": self.settings.twitch_client_id or "", "Authorization": f"Bearer {self.access_token()}"}
         async with httpx.AsyncClient(timeout=15, headers=headers) as client:
-            users, channels, streams = await self._get_initial_resources(client, broadcaster_id)
+            users, channels, streams, followers = await self._get_initial_resources(client, broadcaster_id)
         user = users[0] if users else {}
         channel = channels[0] if channels else {}
         stream = streams[0] if streams else {}
+        follower = followers[0] if followers else {}
         return StreamState(
             streamer=user.get("display_name", "STREAMER"),
             game=stream.get("game_name") or channel.get("game_name") or "NO GAME SELECTED",
@@ -158,6 +159,12 @@ class TwitchClient:
             is_live=bool(stream),
             viewer_count=stream.get("viewer_count", 0),
             stream_started_at=stream.get("started_at"),
+            last_follower=FollowEvent(
+                user_id=follower.get("user_id", ""),
+                user_login=follower.get("user_login", ""),
+                username=follower.get("user_name", "—"),
+                timestamp=follower.get("followed_at"),
+            ),
         )
 
     async def refresh_live_metrics(self, current: StreamState) -> StreamState:
@@ -189,7 +196,7 @@ class TwitchClient:
             detail = response.json().get("message", "sin detalle")
             raise TwitchError(f"No se pudo suscribir a {event_type}: {detail}")
 
-    async def _get_initial_resources(self, client: httpx.AsyncClient, broadcaster_id: str) -> tuple[list, list, list]:
+    async def _get_initial_resources(self, client: httpx.AsyncClient, broadcaster_id: str) -> tuple[list, list, list, list]:
         async def get(path: str, params: dict[str, str]) -> list:
             response = await client.get(f"{HELIX_URL}{path}", params=params)
             if response.is_error:
@@ -199,12 +206,13 @@ class TwitchClient:
                     detail = "respuesta no JSON"
                 raise TwitchError(f"Helix rechazó {path} ({response.status_code}): {detail}")
             return response.json().get("data", [])
-        users, channels, streams = await asyncio.gather(
+        users, channels, streams, followers = await asyncio.gather(
             get("/users", {"id": broadcaster_id}),
             get("/channels", {"broadcaster_id": broadcaster_id}),
             get("/streams", {"user_id": broadcaster_id}),
+            get("/channels/followers", {"broadcaster_id": broadcaster_id, "first": "1"}),
         )
-        return users, channels, streams
+        return users, channels, streams, followers
 
 
 def create_oauth_state() -> str:
