@@ -174,6 +174,8 @@ Desde un equipo de la misma red abre `http://192.168.1.50:8010/auth/twitch/start
 
 Para OBS, usa `http://192.168.1.50:8010/overlay/brb` como Browser Source. No expongas el puerto publicado a Internet.
 
+Para una barra discreta sobre el stream (fondo transparente y datos resumidos en la parte inferior), añade otra Browser Source con `http://192.168.1.50:8010/overlay/stream` y el mismo tamaño de tu lienzo, por ejemplo 1920×1080.
+
 ### Actualizar desde GitHub
 
 ```bash

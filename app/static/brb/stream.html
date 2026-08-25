@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Stream info bar</title>
+    <link rel="stylesheet" href="/static/brb/stream.css" />
+  </head>
+  <body>
+    <main class="stream-overlay" aria-label="Resumen del stream">
+      <section class="stream-bar">
+        <div class="channel-summary">
+          <span class="live-dot" aria-hidden="true"></span>
+          <div class="channel-text">
+            <strong id="streamer">STREAMER</strong>
+            <span id="game">NO GAME SELECTED</span>
+          </div>
+          <div class="live-metrics">
+            <span><b id="viewer-count">0</b> VIEWERS</span>
+            <span><b id="stream-uptime">OFFLINE</b> UPTIME</span>
+          </div>
+        </div>
+        <dl class="recent-events" aria-label="Últimos eventos">
+          <div><dt>FOLLOW</dt><dd id="last-follower">—</dd></div>
+          <div><dt>SUB</dt><dd id="last-subscriber">—</dd></div>
+          <div><dt>CHEER</dt><dd id="last-cheer">—</dd></div>
+          <div><dt>RAID</dt><dd id="last-raid">—</dd></div>
+        </dl>
+      </section>
+    </main>
+    <script src="/static/brb/stream.js"></script>
+  </body>
+</html>

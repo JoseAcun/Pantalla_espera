@@ -256,6 +256,11 @@ async def brb_overlay() -> FileResponse:
     return FileResponse("app/static/brb/index.html")
 
 
+@app.get("/overlay/stream", include_in_schema=False)
+async def stream_overlay() -> FileResponse:
+    return FileResponse("app/static/brb/stream.html")
+
+
 @app.websocket("/ws/overlay")
 async def overlay_socket(websocket: WebSocket) -> None:
     connections: OverlayConnections = app.state.connections

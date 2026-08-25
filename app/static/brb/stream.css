@@ -1,0 +1,28 @@
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body { width: 100%; height: 100%; }
+body { margin: 0; overflow: hidden; background: transparent; color: #e8ffe9; font-family: "Courier New", monospace; }
+.stream-overlay { position: fixed; inset: 0; pointer-events: none; }
+.stream-bar {
+  position: absolute; right: clamp(18px, 2.3vw, 48px); bottom: clamp(18px, 2.3vw, 48px); left: clamp(18px, 2.3vw, 48px);
+  display: grid; grid-template-columns: minmax(300px, .9fr) minmax(0, 1.75fr); gap: clamp(8px, .8vw, 16px);
+  padding: clamp(9px, .75vw, 16px); border: 1px solid #71ff9d88; border-radius: 12px;
+  background: linear-gradient(100deg, #05110be8, #07130ee0); box-shadow: 0 0 22px #0a743633, inset 0 0 18px #0c7a3a1a;
+  backdrop-filter: blur(4px); text-shadow: 0 0 7px #1f9b4a99;
+}
+.channel-summary { min-width: 0; display: flex; align-items: center; gap: clamp(8px, .7vw, 14px); padding: 0 clamp(4px, .4vw, 8px); }
+.live-dot { flex: 0 0 auto; width: clamp(9px, .65vw, 13px); height: clamp(9px, .65vw, 13px); border-radius: 50%; background: #ff5252; box-shadow: 0 0 12px #ff5252; animation: pulse 1.6s ease-in-out infinite; }
+.channel-text { display: grid; min-width: 0; gap: .12em; }
+.channel-text strong { color: #a4ffbf; font-size: clamp(14px, 1.1vw, 23px); letter-spacing: .04em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.channel-text span { color: #c9f7d4; font-size: clamp(11px, .8vw, 17px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-metrics { margin-left: auto; display: grid; gap: .38em; color: #a5c8ae; font-size: clamp(9px, .62vw, 13px); text-align: right; white-space: nowrap; }
+.live-metrics b { color: #effff2; font-size: 1.12em; font-weight: bold; }
+.recent-events { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: clamp(5px, .5vw, 10px); margin: 0; }
+.recent-events div { min-width: 0; padding: clamp(5px, .45vw, 9px) clamp(6px, .55vw, 11px); border-left: 2px solid #45df7388; background: #0a2114a8; }
+dt { color: #76d992; font-size: clamp(8px, .56vw, 12px); letter-spacing: .08em; }
+dd { margin: .22em 0 0; color: #f0fff3; font-size: clamp(11px, .82vw, 17px); font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@keyframes pulse { 50% { opacity: .4; transform: scale(.82); } }
+@media (max-width: 900px) {
+  .stream-bar { grid-template-columns: 1fr; gap: 8px; }
+  .channel-summary { padding: 0; }
+}
