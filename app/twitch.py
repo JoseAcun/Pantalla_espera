@@ -150,6 +150,8 @@ class TwitchClient:
         stream = streams[0] if streams else {}
         follower = followers[0] if followers else {}
         return StreamState(
+            broadcaster_id=broadcaster_id,
+            broadcaster_login=user.get("login", ""),
             streamer=user.get("display_name", "STREAMER"),
             game=stream.get("game_name") or channel.get("game_name") or "NO GAME SELECTED",
             category=stream.get("game_name") or channel.get("game_name") or "",
@@ -185,6 +187,19 @@ class TwitchClient:
             "game": stream.get("game_name") or current.game,
             "category": stream.get("game_name") or current.category,
         })
+
+    async def user_by_login(self, login: str) -> dict[str, Any]:
+        """Look up public Twitch user data without exposing the access token to a browser."""
+        await self.validate_or_refresh()
+        headers = {"Client-Id": self.settings.twitch_client_id or "", "Authorization": f"Bearer {self.access_token()}"}
+        async with httpx.AsyncClient(timeout=15, headers=headers) as client:
+            response = await client.get(f"{HELIX_URL}/users", params={"login": login.strip().lstrip("@")})
+        if response.is_error:
+            raise TwitchError(f"Helix rechazó /users ({response.status_code}).")
+        users = response.json().get("data", [])
+        if not users:
+            raise TwitchError("No encontré ningún usuario de Twitch con ese nick.")
+        return users[0]
 
     async def create_eventsub_subscription(self, event_type: str, version: str, condition: dict[str, str], session_id: str) -> None:
         """Create an EventSub subscription tied to Twitch's EventSub WebSocket."""

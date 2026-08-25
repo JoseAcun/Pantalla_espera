@@ -1,24 +1,30 @@
 import asyncio
 import contextlib
 import logging
-import time
+import secrets
 import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
 from app.config import get_settings
 from app.eventsub import EventSubClient
 from app.database import EventRepository
-from app.models import StreamState
+from app.models import StreamState, SubscriptionEvent
 from app.state import StreamStateStore
 from app.twitch import TwitchClient, TwitchError, create_oauth_state
 from app.websocket import OverlayConnections
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
+
+
+class ManualSubscriberRequest(BaseModel):
+    login: str = Field(min_length=1, max_length=255)
+    tier: str = Field(default="1000", pattern=r"^(1000|2000|3000)$")
 
 
 async def refresh_metrics_periodically(app: FastAPI) -> None:
@@ -34,6 +40,24 @@ async def refresh_metrics_periodically(app: FastAPI) -> None:
             await app.state.connections.broadcast({"type": "stream_state", "data": refreshed.model_dump(mode="json")})
         except Exception as error:
             logger.warning("Could not refresh live metrics: %s", error)
+
+
+async def persist_hydrated_follower(app: FastAPI, state: StreamState) -> None:
+    """Helix supplies one existing follower at startup; persist it like an EventSub follow."""
+    if app.state.repository:
+        try:
+            await asyncio.to_thread(app.state.repository.record_hydrated_follower, state)
+        except Exception:
+            logger.exception("Could not persist the follower recovered from Helix")
+
+
+def require_admin_token(request: Request) -> None:
+    expected = get_settings().overlay_admin_token
+    supplied = request.headers.get("X-Overlay-Admin-Token", "")
+    if not expected:
+        raise HTTPException(status_code=503, detail="Define OVERLAY_ADMIN_TOKEN antes de usar cambios manuales.")
+    if not secrets.compare_digest(supplied, expected):
+        raise HTTPException(status_code=403, detail="Token de administración inválido.")
 
 
 def initial_state() -> StreamState:
@@ -61,6 +85,7 @@ async def lifespan(app: FastAPI):
         try:
             hydrated = await app.state.twitch.hydrate_state()
             await app.state.stream_state.replace(hydrated)
+            await persist_hydrated_follower(app, hydrated)
             app.state.eventsub.start()
         except Exception as error:
             logger.warning("Could not restore Twitch state at startup: %s", error)
@@ -129,6 +154,7 @@ async def twitch_auth_poll(request: Request) -> dict[str, object]:
             return {"connected": False, "message": "Esperando autorización en Twitch…"}
         stream_state = await request.app.state.twitch.hydrate_state()
         await request.app.state.stream_state.replace(stream_state)
+        await persist_hydrated_follower(request.app, stream_state)
         await request.app.state.eventsub.restore_from_repository()
         await request.app.state.connections.broadcast({"type": "stream_state", "data": stream_state.model_dump(mode="json")})
         request.app.state.eventsub.start()
@@ -153,6 +179,7 @@ async def twitch_auth_callback(request: Request, code: str | None = None, state:
         await request.app.state.twitch.exchange_code(code)
         stream_state = await request.app.state.twitch.hydrate_state()
         await request.app.state.stream_state.replace(stream_state)
+        await persist_hydrated_follower(request.app, stream_state)
         await request.app.state.connections.broadcast({"type": "stream_state", "data": stream_state.model_dump(mode="json")})
         request.app.state.eventsub.start()
     except TwitchError as exc:
@@ -177,6 +204,41 @@ async def twitch_status(request: Request) -> dict:
     return {"connected": True, "eventsub_connected": request.app.state.eventsub.connected, "login": token["login"], "user_id": token["user_id"], "scopes": token.get("scopes", [])}
 
 
+@app.get("/api/twitch/users/{login}")
+async def twitch_user_lookup(login: str, request: Request) -> dict[str, str]:
+    """Inspect the public Twitch profile resolved from a nick before adding it manually."""
+    try:
+        user = await request.app.state.twitch.user_by_login(login)
+    except TwitchError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return {key: str(user.get(key, "")) for key in ("id", "login", "display_name", "description", "profile_image_url", "created_at", "broadcaster_type")}
+
+
+@app.post("/api/twitch/manual/subscriber", response_model=StreamState)
+async def add_manual_subscriber(payload: ManualSubscriberRequest, request: Request) -> StreamState:
+    """Save a manually confirmed latest subscriber after resolving their Twitch account."""
+    require_admin_token(request)
+    repository: EventRepository | None = request.app.state.repository
+    if not repository:
+        raise HTTPException(status_code=503, detail="DATABASE_URL no está configurada.")
+    try:
+        user = await request.app.state.twitch.user_by_login(payload.login)
+        state = await request.app.state.stream_state.get()
+        if not state.broadcaster_id:
+            state = await request.app.state.twitch.hydrate_state()
+            await request.app.state.stream_state.replace(state)
+        await asyncio.to_thread(repository.record_manual_subscription, state, user, payload.tier)
+    except (TwitchError, ValueError) as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    event = SubscriptionEvent(
+        user_id=user["id"], user_login=user.get("login", ""), username=user.get("display_name", "—"), tier=payload.tier,
+    )
+    updated = await request.app.state.stream_state.update(last_subscriber=event)
+    await request.app.state.connections.broadcast({"type": "event", "event": "subscribe", "data": event.model_dump(mode="json")})
+    await request.app.state.connections.broadcast({"type": "stream_state", "data": updated.model_dump(mode="json")})
+    return updated
+
+
 @app.post("/api/twitch/sync", response_model=StreamState)
 async def twitch_sync(request: Request) -> StreamState:
     try:
@@ -184,6 +246,7 @@ async def twitch_sync(request: Request) -> StreamState:
     except TwitchError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
     await request.app.state.stream_state.replace(state)
+    await persist_hydrated_follower(request.app, state)
     await request.app.state.connections.broadcast({"type": "stream_state", "data": state.model_dump(mode="json")})
     return state
 

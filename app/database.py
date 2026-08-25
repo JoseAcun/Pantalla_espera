@@ -1,23 +1,91 @@
-"""Optional MariaDB event persistence for restoring overlay data after restarts."""
+"""MariaDB persistence for EventSub deliveries and normalized Twitch metrics."""
 
+import hashlib
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import DateTime, Integer, JSON, MetaData, String, Table, Column, create_engine, desc, select
+from sqlalchemy import JSON, BigInteger, Boolean, Column, DateTime, ForeignKey, Integer, MetaData, String, Table, Text, create_engine, desc, select
+from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.exc import IntegrityError
+
+from app.models import StreamState
 
 
 metadata = MetaData()
+users = Table(
+    "twitch_users", metadata,
+    Column("twitch_user_id", String(32), primary_key=True),
+    Column("login", String(255), nullable=False),
+    Column("display_name", String(255), nullable=False),
+    Column("first_seen_at", DateTime(timezone=True), nullable=False),
+    Column("last_seen_at", DateTime(timezone=True), nullable=False),
+)
+user_name_history = Table(
+    "twitch_user_name_history", metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("twitch_user_id", String(32), ForeignKey("twitch_users.twitch_user_id"), nullable=False),
+    Column("login", String(255), nullable=False),
+    Column("display_name", String(255), nullable=False),
+    Column("observed_at", DateTime(timezone=True), nullable=False),
+)
 events = Table(
-    "twitch_events",
-    metadata,
-    Column("id", Integer, primary_key=True),
+    "twitch_events", metadata,
+    Column("id", BigInteger, primary_key=True),
     Column("message_id", String(64), nullable=False, unique=True),
     Column("event_type", String(64), nullable=False, index=True),
     Column("payload", JSON, nullable=False),
     Column("occurred_at", DateTime(timezone=True), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)),
 )
+follows = Table(
+    "follows", metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("event_message_id", String(64), ForeignKey("twitch_events.message_id"), nullable=False, unique=True),
+    Column("follower_id", String(32), ForeignKey("twitch_users.twitch_user_id"), nullable=False),
+    Column("broadcaster_id", String(32), ForeignKey("twitch_users.twitch_user_id"), nullable=False),
+    Column("followed_at", DateTime(timezone=True), nullable=False),
+)
+subscription_events = Table(
+    "subscription_events", metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("event_message_id", String(64), ForeignKey("twitch_events.message_id"), nullable=False, unique=True),
+    Column("subscriber_id", String(32), ForeignKey("twitch_users.twitch_user_id"), nullable=False),
+    Column("broadcaster_id", String(32), ForeignKey("twitch_users.twitch_user_id"), nullable=False),
+    Column("tier", String(4), nullable=False),
+    Column("is_gift", Boolean, nullable=False, default=False),
+    Column("occurred_at", DateTime(timezone=True), nullable=False),
+)
+cheers = Table(
+    "cheers", metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("event_message_id", String(64), ForeignKey("twitch_events.message_id"), nullable=False, unique=True),
+    Column("cheerer_id", String(32), ForeignKey("twitch_users.twitch_user_id"), nullable=True),
+    Column("broadcaster_id", String(32), ForeignKey("twitch_users.twitch_user_id"), nullable=False),
+    Column("is_anonymous", Boolean, nullable=False, default=False),
+    Column("bits", Integer, nullable=False),
+    Column("message", Text, nullable=False),
+    Column("occurred_at", DateTime(timezone=True), nullable=False),
+)
+raids = Table(
+    "raids", metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("event_message_id", String(64), ForeignKey("twitch_events.message_id"), nullable=False, unique=True),
+    Column("from_broadcaster_id", String(32), ForeignKey("twitch_users.twitch_user_id"), nullable=False),
+    Column("to_broadcaster_id", String(32), ForeignKey("twitch_users.twitch_user_id"), nullable=False),
+    Column("viewers", Integer, nullable=False),
+    Column("occurred_at", DateTime(timezone=True), nullable=False),
+)
+
+
+def _as_datetime(value: Any, fallback: datetime) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            pass
+    return fallback
 
 
 class EventRepository:
@@ -28,18 +96,103 @@ class EventRepository:
         metadata.create_all(self.engine)
 
     def save(self, message_id: str, event_type: str, payload: dict[str, Any], occurred_at: datetime) -> bool:
-        """Return False for a duplicate EventSub delivery."""
+        """Store a delivery once, then map overlay-supported events to metric tables."""
         try:
             with self.engine.begin() as connection:
                 connection.execute(events.insert().values(
-                    message_id=message_id,
-                    event_type=event_type,
-                    payload=payload,
-                    occurred_at=occurred_at,
+                    message_id=message_id, event_type=event_type, payload=payload, occurred_at=occurred_at,
                 ))
+                self._normalize_event(connection, message_id, event_type, payload, occurred_at)
             return True
-        except IntegrityError:
+        except IntegrityError as error:
+            # EventSub can redeliver a notification. The unique raw message ID makes it idempotent.
+            if "message_id" in str(error.orig).lower() or "duplicate" in str(error.orig).lower():
+                return False
+            raise
+
+    def record_hydrated_follower(self, state: StreamState) -> bool:
+        """Save the latest follower returned by Helix, even if it predates this container."""
+        follower = state.last_follower
+        if not (state.broadcaster_id and follower.user_id and follower.timestamp):
             return False
+        occurred_at = _as_datetime(follower.timestamp, datetime.now(timezone.utc))
+        fingerprint = f"{state.broadcaster_id}:{follower.user_id}:{occurred_at.isoformat()}"
+        message_id = "helix-" + hashlib.sha256(fingerprint.encode()).hexdigest()[:58]
+        payload = {
+            "user_id": follower.user_id, "user_login": follower.user_login, "user_name": follower.username,
+            "broadcaster_user_id": state.broadcaster_id, "broadcaster_user_login": state.broadcaster_login,
+            "broadcaster_user_name": state.streamer, "followed_at": occurred_at.isoformat(),
+        }
+        return self.save(message_id, "channel.follow", payload, occurred_at)
+
+    def record_manual_subscription(self, state: StreamState, subscriber: dict[str, Any], tier: str) -> bool:
+        """Record a manually confirmed subscriber, retaining its provenance in the raw event."""
+        if not state.broadcaster_id or not subscriber.get("id"):
+            raise ValueError("Falta la identidad del broadcaster o del suscriptor.")
+        occurred_at = datetime.now(timezone.utc)
+        fingerprint = f"manual-sub:{state.broadcaster_id}:{subscriber['id']}:{occurred_at.isoformat()}"
+        message_id = "manual-" + hashlib.sha256(fingerprint.encode()).hexdigest()[:57]
+        payload = {
+            "user_id": subscriber["id"], "user_login": subscriber.get("login", ""),
+            "user_name": subscriber.get("display_name", ""), "broadcaster_user_id": state.broadcaster_id,
+            "broadcaster_user_login": state.broadcaster_login, "broadcaster_user_name": state.streamer,
+            "tier": tier, "is_gift": False, "source": "manual",
+        }
+        return self.save(message_id, "channel.subscribe", payload, occurred_at)
+
+    def _upsert_user(self, connection: Any, user_id: str, login: str, display_name: str, observed_at: datetime) -> None:
+        if not user_id:
+            return
+        login = login or display_name or user_id
+        display_name = display_name or login
+        existing = connection.execute(
+            select(users.c.login, users.c.display_name).where(users.c.twitch_user_id == user_id)
+        ).first()
+        if existing and (existing.login != login or existing.display_name != display_name):
+            connection.execute(user_name_history.insert().values(
+                twitch_user_id=user_id, login=login, display_name=display_name, observed_at=observed_at,
+            ))
+        statement = mysql_insert(users).values(
+            twitch_user_id=user_id, login=login, display_name=display_name,
+            first_seen_at=observed_at, last_seen_at=observed_at,
+        )
+        connection.execute(statement.on_duplicate_key_update(
+            login=statement.inserted.login, display_name=statement.inserted.display_name,
+            last_seen_at=statement.inserted.last_seen_at,
+        ))
+
+    def _normalize_event(self, connection: Any, message_id: str, event_type: str, event: dict[str, Any], received_at: datetime) -> None:
+        broadcaster_id = event.get("broadcaster_user_id", "")
+        self._upsert_user(connection, broadcaster_id, event.get("broadcaster_user_login", ""), event.get("broadcaster_user_name", ""), received_at)
+        if event_type == "channel.follow":
+            followed_at = _as_datetime(event.get("followed_at"), received_at)
+            self._upsert_user(connection, event["user_id"], event.get("user_login", ""), event.get("user_name", ""), followed_at)
+            connection.execute(follows.insert().values(
+                event_message_id=message_id, follower_id=event["user_id"], broadcaster_id=broadcaster_id, followed_at=followed_at,
+            ))
+        elif event_type == "channel.subscribe":
+            self._upsert_user(connection, event["user_id"], event.get("user_login", ""), event.get("user_name", ""), received_at)
+            connection.execute(subscription_events.insert().values(
+                event_message_id=message_id, subscriber_id=event["user_id"], broadcaster_id=broadcaster_id,
+                tier=event.get("tier", ""), is_gift=event.get("is_gift", False), occurred_at=received_at,
+            ))
+        elif event_type == "channel.cheer":
+            cheerer_id = event.get("user_id") or None
+            if cheerer_id:
+                self._upsert_user(connection, cheerer_id, event.get("user_login", ""), event.get("user_name", ""), received_at)
+            connection.execute(cheers.insert().values(
+                event_message_id=message_id, cheerer_id=cheerer_id, broadcaster_id=broadcaster_id,
+                is_anonymous=bool(event.get("is_anonymous", not cheerer_id)), bits=event.get("bits", 0),
+                message=event.get("message", ""), occurred_at=received_at,
+            ))
+        elif event_type == "channel.raid":
+            source_id, target_id = event["from_broadcaster_user_id"], event["to_broadcaster_user_id"]
+            self._upsert_user(connection, source_id, event.get("from_broadcaster_user_login", ""), event.get("from_broadcaster_user_name", ""), received_at)
+            self._upsert_user(connection, target_id, event.get("to_broadcaster_user_login", ""), event.get("to_broadcaster_user_name", ""), received_at)
+            connection.execute(raids.insert().values(
+                event_message_id=message_id, from_broadcaster_id=source_id, to_broadcaster_id=target_id,
+                viewers=event.get("viewers", 0), occurred_at=received_at,
+            ))
 
     def latest_events(self) -> list[tuple[str, dict[str, Any], datetime]]:
         """Return the most recent stored event for every overlay-supported type."""
@@ -49,9 +202,7 @@ class EventRepository:
             for event_type in event_types:
                 row = connection.execute(
                     select(events.c.event_type, events.c.payload, events.c.occurred_at)
-                    .where(events.c.event_type == event_type)
-                    .order_by(desc(events.c.occurred_at))
-                    .limit(1)
+                    .where(events.c.event_type == event_type).order_by(desc(events.c.occurred_at)).limit(1)
                 ).first()
                 if row:
                     result.append((row.event_type, row.payload, row.occurred_at))

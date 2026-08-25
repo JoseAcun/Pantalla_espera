@@ -52,7 +52,9 @@ También muestra viewers actuales y duración del directo. La duración se calcu
 
 ### Persistencia opcional con MariaDB
 
-Si defines `DATABASE_URL`, el backend crea la tabla `twitch_events` al iniciar y guarda follows, subs, cheers y raids. Al reiniciar, restaura el último evento de cada tipo y evita duplicados de EventSub mediante el identificador de mensaje. Además, Helix consulta el último follow existente al conectar, aunque haya ocurrido antes de arrancar el backend.
+Si defines `DATABASE_URL`, el backend guarda cada entrega de EventSub en `twitch_events` y la relaciona con `twitch_users`, `follows`, `subscription_events`, `cheers` o `raids`. Al reiniciar, restaura el último evento de cada tipo y evita duplicados mediante el identificador de mensaje. Además, Helix consulta y persiste el último follow existente al conectar, aunque haya ocurrido antes de arrancar el backend.
+
+Para registrar un sub que confirmaste manualmente, define `OVERLAY_ADMIN_TOKEN` en `.env`. Primero consulta `GET /api/twitch/users/{nick}`; después envía `POST /api/twitch/manual/subscriber` con el encabezado `X-Overlay-Admin-Token`, el `login` y el `tier` (`1000`, `2000` o `3000`). El registro queda marcado como `source: manual` en `twitch_events`.
 
 ## OBS
 
@@ -142,6 +144,10 @@ El script usa `git pull --ff-only`, actualiza dependencias y reinicia el servici
 ## Despliegue recomendado: Docker Compose en Raspberry Pi
 
 Esta es la opción recomendada para la Pi. La imagen contiene el código y dependencias; `.env` se queda en la Pi y un volumen Docker persistente conserva los tokens de Twitch al actualizar o recrear el contenedor.
+
+`compose.yaml` debe permanecer versionado: describe la aplicación reproducible. Los valores propios de cada equipo van en `.env`, que está ignorado por Git. Por ejemplo, `OVERLAY_PORT=8010` evita editar el YAML cuando el puerto 8000 ya está ocupado.
+
+Si alguna vez necesitas cambiar la estructura solo en una Pi (por ejemplo, añadir otro volumen), crea `compose.override.yaml`; Docker Compose lo aplica automáticamente y el proyecto lo ignora en Git.
 
 ### Instalar Docker y arrancar
 

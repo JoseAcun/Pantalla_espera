@@ -34,6 +34,8 @@ class RaidEvent(BaseModel):
 
 
 class StreamState(BaseModel):
+    broadcaster_id: str = ""
+    broadcaster_login: str = ""
     streamer: str = "STREAMER"
     game: str = "NO GAME SELECTED"
     category: str = ""

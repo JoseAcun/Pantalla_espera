@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     twitch_redirect_uri: str = "http://localhost:8000/auth/twitch/callback"
     twitch_token_file: str = ".twitch_tokens.json"
     database_url: str | None = None
+    overlay_admin_token: str | None = None
     overlay_status: str = "AFK"
     overlay_episode: str = ""
     overlay_custom_message: str = ""
