@@ -4,6 +4,7 @@ import logging
 import secrets
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
@@ -14,6 +15,7 @@ from app.config import get_settings
 from app.eventsub import EventSubClient
 from app.database import EventRepository
 from app.models import StreamState, SubscriptionEvent
+from app.pokemon import MAX_TEAM_SIZE, PokeApiClient, PokemonError, PokemonTeam, PokemonTeamStore
 from app.state import StreamStateStore
 from app.twitch import TwitchClient, TwitchError, create_oauth_state
 from app.websocket import OverlayConnections
@@ -25,6 +27,11 @@ logger = logging.getLogger(__name__)
 class ManualSubscriberRequest(BaseModel):
     login: str = Field(min_length=1, max_length=255)
     tier: str = Field(default="1000", pattern=r"^(1000|2000|3000)$")
+
+
+class PokemonMemberRequest(BaseModel):
+    pokemon: str = Field(min_length=1, max_length=100)
+    nickname: str = Field(default="", max_length=32)
 
 
 async def refresh_metrics_periodically(app: FastAPI) -> None:
@@ -74,6 +81,9 @@ async def lifespan(app: FastAPI):
     app.state.stream_state = StreamStateStore(initial_state())
     app.state.connections = OverlayConnections()
     app.state.twitch = TwitchClient(get_settings())
+    app.state.pokemon_team = PokemonTeamStore(get_settings().pokemon_data_dir)
+    await asyncio.to_thread(app.state.pokemon_team.initialize)
+    app.state.pokemon_api = PokeApiClient(app.state.pokemon_team)
     app.state.oauth_states = {}
     database_url = get_settings().database_url
     app.state.repository = EventRepository(database_url) if database_url else None
@@ -101,6 +111,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Twitch Stream Overlay", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
+app.mount(
+    "/pokemon/sprites",
+    StaticFiles(directory=str(Path(get_settings().pokemon_data_dir) / "pokemon-sprites"), check_dir=False),
+    name="pokemon-sprites",
+)
 
 
 @app.get("/health")
@@ -251,6 +266,44 @@ async def twitch_sync(request: Request) -> StreamState:
     return state
 
 
+@app.get("/api/pokemon/team", response_model=PokemonTeam)
+async def pokemon_team(request: Request) -> PokemonTeam:
+    return await asyncio.to_thread(request.app.state.pokemon_team.get_team)
+
+
+@app.get("/api/pokemon/search")
+async def pokemon_search(request: Request, q: str = "") -> list[dict[str, str]]:
+    require_admin_token(request)
+    try:
+        return await request.app.state.pokemon_api.search(q)
+    except PokemonError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+@app.put("/api/pokemon/team/{slot}", response_model=PokemonTeam)
+async def save_pokemon_member(slot: int, payload: PokemonMemberRequest, request: Request) -> PokemonTeam:
+    require_admin_token(request)
+    if not 1 <= slot <= MAX_TEAM_SIZE:
+        raise HTTPException(status_code=422, detail=f"El espacio debe estar entre 1 y {MAX_TEAM_SIZE}.")
+    try:
+        member = await request.app.state.pokemon_api.make_member(slot, payload.pokemon, payload.nickname)
+        team = await asyncio.to_thread(request.app.state.pokemon_team.save_member, member)
+    except PokemonError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    await request.app.state.connections.broadcast({"type": "pokemon_team", "data": team.model_dump(mode="json")})
+    return team
+
+
+@app.delete("/api/pokemon/team/{slot}", response_model=PokemonTeam)
+async def delete_pokemon_member(slot: int, request: Request) -> PokemonTeam:
+    require_admin_token(request)
+    if not 1 <= slot <= MAX_TEAM_SIZE:
+        raise HTTPException(status_code=422, detail=f"El espacio debe estar entre 1 y {MAX_TEAM_SIZE}.")
+    team = await asyncio.to_thread(request.app.state.pokemon_team.clear_slot, slot)
+    await request.app.state.connections.broadcast({"type": "pokemon_team", "data": team.model_dump(mode="json")})
+    return team
+
+
 @app.get("/overlay/brb", include_in_schema=False)
 async def brb_overlay() -> FileResponse:
     return FileResponse("app/static/brb/index.html")
@@ -261,6 +314,16 @@ async def stream_overlay() -> FileResponse:
     return FileResponse("app/static/brb/stream.html")
 
 
+@app.get("/overlay/pokemon", include_in_schema=False)
+async def pokemon_overlay() -> FileResponse:
+    return FileResponse("app/static/pokemon/overlay.html")
+
+
+@app.get("/admin/pokemon", include_in_schema=False)
+async def pokemon_admin() -> FileResponse:
+    return FileResponse("app/static/pokemon/admin.html")
+
+
 @app.websocket("/ws/overlay")
 async def overlay_socket(websocket: WebSocket) -> None:
     connections: OverlayConnections = app.state.connections
@@ -268,6 +331,8 @@ async def overlay_socket(websocket: WebSocket) -> None:
     try:
         state = await app.state.stream_state.get()
         await websocket.send_json({"type": "stream_state", "data": state.model_dump(mode="json")})
+        team = await asyncio.to_thread(websocket.app.state.pokemon_team.get_team)
+        await websocket.send_json({"type": "pokemon_team", "data": team.model_dump(mode="json")})
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:

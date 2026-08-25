@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Administrar equipo Pokémon</title>
+    <link rel="stylesheet" href="/static/pokemon/admin.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <div><p class="eyebrow">STREAM OVERLAY</p><h1>Equipo Pokémon</h1></div>
+        <label class="token">Token de administración<input id="admin-token" type="password" autocomplete="off" placeholder="OVERLAY_ADMIN_TOKEN" /></label>
+      </header>
+      <p class="intro">Busca un Pokémon, selecciónalo, asigna un apodo y guarda. Los sprites se descargan y quedan guardados en la Raspberry.</p>
+      <p id="status" role="status">Introduce el token para administrar el equipo.</p>
+      <section id="team-editor" class="team-editor" aria-label="Seis espacios del equipo"></section>
+    </main>
+    <script src="/static/pokemon/admin.js"></script>
+  </body>
+</html>

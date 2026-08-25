@@ -1,0 +1,12 @@
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body { width: 100%; height: 100%; }
+body { margin: 0; overflow: hidden; background: transparent; font-family: "Courier New", monospace; }
+.pokemon-party { position: fixed; top: 50%; right: clamp(18px, 2.2vw, 44px); display: grid; gap: clamp(5px, .45vw, 9px); width: clamp(152px, 13vw, 250px); transform: translateY(-50%); }
+.pokemon-card { display: grid; grid-template-columns: clamp(48px, 4.4vw, 82px) minmax(0, 1fr); align-items: center; min-height: clamp(56px, 5vw, 94px); padding: clamp(4px, .35vw, 7px); border: 1px solid #74ff9b8a; border-left: clamp(3px, .25vw, 5px) solid #70ff9b; border-radius: 8px; background: linear-gradient(100deg, #06130aed, #07170ee0); box-shadow: 0 0 16px #0d7b3735, inset 0 0 12px #14743b19; }
+.pokemon-card img { width: 100%; max-height: clamp(52px, 5vw, 86px); object-fit: contain; image-rendering: auto; filter: drop-shadow(0 0 5px #80ffad80); }
+.pokemon-info { min-width: 0; padding: 0 clamp(4px, .45vw, 9px); color: #effff2; text-shadow: 0 0 6px #1c9d4988; }
+.pokemon-name, .pokemon-nickname { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pokemon-name { color: #83ffaa; font-size: clamp(11px, .95vw, 19px); font-weight: bold; letter-spacing: .025em; }
+.pokemon-nickname { margin-top: .18em; color: #c5e8cf; font-size: clamp(9px, .68vw, 14px); }
+.pokemon-types { margin-top: .35em; color: #76ca90; font-size: clamp(8px, .55vw, 12px); letter-spacing: .05em; text-transform: uppercase; }

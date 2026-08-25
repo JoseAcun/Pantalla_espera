@@ -1,0 +1,17 @@
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+body { max-width: 1180px; min-height: 100vh; margin: auto; padding: clamp(20px, 4vw, 60px); background: #050b07; color: #e8ffe9; font: 16px/1.4 "Courier New", monospace; }
+header { display: flex; align-items: end; justify-content: space-between; gap: 24px; padding-bottom: 20px; border-bottom: 1px solid #56de7888; }
+h1 { margin: 0; color: #88ffae; font-size: clamp(28px, 4vw, 46px); } .eyebrow { margin: 0 0 5px; color: #65c783; font-size: .76em; letter-spacing: .13em; }
+.token { display: grid; gap: 5px; min-width: min(100%, 330px); color: #abd9b9; font-size: .8em; }
+input { width: 100%; padding: .62em .72em; border: 1px solid #4eb970; border-radius: 5px; outline: none; background: #0a1b10; color: #f0fff3; font: inherit; }
+input:focus { border-color: #94ffb7; box-shadow: 0 0 0 2px #57df7826; }
+.intro { color: #bed8c5; } #status { min-height: 1.5em; color: #eaff91; }
+.team-editor { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.slot { padding: 16px; border: 1px solid #3f9d5c88; border-radius: 9px; background: #08120ccf; box-shadow: inset 0 0 20px #0c632a15; }
+.slot h2 { margin: 0 0 12px; color: #80f8a4; font-size: 1em; }.search-row { display: flex; gap: 7px; }.search-row input { min-width: 0; }
+.results { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; min-height: 30px; margin: 8px 0; }
+button { padding: .54em .65em; border: 1px solid #55d979; border-radius: 5px; background: #103b1e; color: #eaffee; cursor: pointer; font: inherit; } button:hover { background: #185128; } button.danger { border-color: #e36565; background: #401717; }
+.preview { display: flex; align-items: center; gap: 10px; min-height: 60px; margin: 8px 0; color: #a7c9af; }.preview img { width: 56px; height: 56px; object-fit: contain; }.preview strong { display: block; color: #edfff1; }.preview small { color: #78c98e; }
+.actions { display: flex; gap: 7px; margin-top: 9px; }.actions button { flex: 1; }
+@media (max-width: 760px) { body { padding: 20px; } header, .team-editor { grid-template-columns: 1fr; display: grid; } .token { min-width: 0; } .results { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

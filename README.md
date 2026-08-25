@@ -176,6 +176,10 @@ Para OBS, usa `http://192.168.1.50:8010/overlay/brb` como Browser Source. No exp
 
 Para una barra discreta sobre el stream (fondo transparente y datos resumidos en la parte inferior), añade otra Browser Source con `http://192.168.1.50:8010/overlay/stream` y el mismo tamaño de tu lienzo, por ejemplo 1920×1080.
 
+### Equipo Pokémon
+
+Abre `http://192.168.1.50:8010/admin/pokemon`, escribe el valor de `OVERLAY_ADMIN_TOKEN`, y configura hasta seis Pokémon con apodo opcional. Al guardar, el backend consulta PokéAPI y conserva el sprite en el volumen `/data`; por ello el overlay sigue mostrando el equipo aunque PokéAPI no esté disponible durante el stream. En OBS añade una Browser Source transparente con `http://192.168.1.50:8010/overlay/pokemon`, a la resolución de tu lienzo. La barra lateral se actualiza en vivo al guardar un cambio.
+
 ### Actualizar desde GitHub
 
 ```bash

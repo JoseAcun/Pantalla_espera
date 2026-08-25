@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     twitch_token_file: str = ".twitch_tokens.json"
     database_url: str | None = None
     overlay_admin_token: str | None = None
+    pokemon_data_dir: str = "data"
     overlay_status: str = "AFK"
     overlay_episode: str = ""
     overlay_custom_message: str = ""
