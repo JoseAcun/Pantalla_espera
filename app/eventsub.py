@@ -25,6 +25,7 @@ class EventSubClient:
         self.game_handler = game_handler
         self.task: asyncio.Task | None = None
         self.connected = False
+        self.subscribed_types: set[str] = set()
 
     def start(self) -> None:
         if not self.task or self.task.done():
@@ -83,12 +84,17 @@ class EventSubClient:
         else:
             logger.warning("Chat RPG disabled until Twitch OAuth includes user:read:chat")
         for event_type, version, condition in definitions:
+            logger.info("Creating EventSub subscription: %s", event_type)
             await self.twitch.create_eventsub_subscription(event_type, version, condition, session_id)
+            self.subscribed_types.add(event_type)
+            logger.info("EventSub subscription enabled: %s", event_type)
 
     async def _handle(self, message: dict) -> None:
         event_type = message["metadata"]["subscription_type"]
         event = message["payload"]["event"]
         now = datetime.now(timezone.utc)
+        if event_type == "channel.chat.message":
+            logger.info("Chat message received from %s: %s", event.get("chatter_user_login", "unknown"), event.get("message", {}).get("text", ""))
         if self.repository:
             is_new = await asyncio.to_thread(
                 self.repository.save,

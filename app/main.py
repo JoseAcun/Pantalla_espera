@@ -254,7 +254,14 @@ async def twitch_status(request: Request) -> dict:
         token = await client.validate_or_refresh()
     except TwitchError as error:
         return {"connected": False, "reason": str(error)}
-    return {"connected": True, "eventsub_connected": request.app.state.eventsub.connected, "login": token["login"], "user_id": token["user_id"], "scopes": token.get("scopes", [])}
+    scopes = token.get("scopes", [])
+    return {
+        "connected": True,
+        "eventsub_connected": request.app.state.eventsub.connected,
+        "eventsub_types": sorted(request.app.state.eventsub.subscribed_types),
+        "chat_ready": "user:read:chat" in scopes and "channel.chat.message" in request.app.state.eventsub.subscribed_types,
+        "login": token["login"], "user_id": token["user_id"], "scopes": scopes,
+    }
 
 
 @app.get("/api/twitch/users/{login}")
