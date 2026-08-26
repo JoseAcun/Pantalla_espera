@@ -119,7 +119,8 @@ class GameController:
         parts = []
         for mission in missions[:3]:
             state = "✓" if mission.completed else f"{mission.progress}/{mission.objective_target}"
-            parts.append(f"{mission.cadence.upper()} {mission.name} {state} {labels.get(mission.objective_type, 'progreso')}")
+            objective = mission.description or labels.get(mission.objective_type, "progreso")
+            parts.append(f"{mission.cadence.upper()} {mission.name} {state}: {objective}")
         suffix = " // ".join(parts)
         return f"[GAME MASTER] {display_name} // {suffix}"[:500]
 

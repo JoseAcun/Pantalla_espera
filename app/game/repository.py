@@ -18,6 +18,7 @@ from app.game.models import (
     QuestCompletion,
     QuestDefinition,
     QuestDefinitionInput,
+    QuestDefinitionUpdate,
 )
 from app.game.service import CREDITS_PER_ACTION, XP_PER_ACTION, GAME_TIMEZONE, GameError, boss_intent, new_encounter, quest_period_key, resolve_round
 
@@ -118,6 +119,27 @@ class GameRepository:
                        reward_random_item, enabled
                 FROM game_quest_definitions WHERE id = :id
             """), {"id": result.lastrowid}).one()
+        return QuestDefinition(**dict(row._mapping))
+
+    def update_quest(self, quest_id: int, quest: QuestDefinitionUpdate) -> QuestDefinition:
+        with self.engine.begin() as connection:
+            result = connection.execute(text("""
+                UPDATE game_quest_definitions
+                SET twitch_category_id = NULLIF(:category_id, ''), cadence = :cadence,
+                    name = :name, description = :description, objective_type = :objective_type,
+                    objective_target = :objective_target, reward_xp = :reward_xp,
+                    reward_credits = :reward_credits, reward_random_item = :reward_random_item,
+                    enabled = :enabled
+                WHERE id = :id
+            """), {**quest.model_dump(), "id": quest_id})
+            if not result.rowcount:
+                raise GameError("La misión ya no existe.")
+            row = connection.execute(text("""
+                SELECT id, twitch_category_id AS category_id, cadence, name, description,
+                       objective_type, objective_target, reward_xp, reward_credits,
+                       reward_random_item, enabled
+                FROM game_quest_definitions WHERE id = :id
+            """), {"id": quest_id}).one()
         return QuestDefinition(**dict(row._mapping))
 
     def _upsert_actor(self, connection: Any, actor: ChatActor, now: datetime) -> None:

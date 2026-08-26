@@ -85,6 +85,10 @@ class QuestDefinition(QuestDefinitionInput):
     enabled: bool = True
 
 
+class QuestDefinitionUpdate(QuestDefinitionInput):
+    enabled: bool = True
+
+
 class PlayerQuest(BaseModel):
     id: int
     cadence: str

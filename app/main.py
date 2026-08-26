@@ -23,6 +23,7 @@ from app.game.models import (
     ItemDefinitionInput,
     QuestDefinition,
     QuestDefinitionInput,
+    QuestDefinitionUpdate,
 )
 from app.game.repository import GameRepository
 from app.game.service import GameError
@@ -411,6 +412,15 @@ async def game_quests(request: Request) -> list[QuestDefinition]:
 async def create_game_quest(payload: QuestDefinitionInput, request: Request) -> QuestDefinition:
     require_admin_token(request)
     return await asyncio.to_thread(game_repository_or_503(request).create_quest, payload)
+
+
+@app.put("/api/game/quests/{quest_id}", response_model=QuestDefinition)
+async def update_game_quest(quest_id: int, payload: QuestDefinitionUpdate, request: Request) -> QuestDefinition:
+    require_admin_token(request)
+    try:
+        return await asyncio.to_thread(game_repository_or_503(request).update_quest, quest_id, payload)
+    except GameError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
 
 
 @app.get("/api/pokemon/team", response_model=PokemonTeam)
