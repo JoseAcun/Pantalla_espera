@@ -7,7 +7,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
 
 from app.game.models import CategoryContent, ChatActor, EncounterState, ItemDefinition, ItemDefinitionInput, PlayerProfile
-from app.game.service import CREDITS_PER_ACTION, XP_PER_ACTION, GameError, new_encounter, resolve_round
+from app.game.service import CREDITS_PER_ACTION, XP_PER_ACTION, GameError, boss_intent, new_encounter, resolve_round
 
 
 class GameRepository:
@@ -16,7 +16,8 @@ class GameRepository:
 
     @staticmethod
     def _encounter(row: Any) -> EncounterState:
-        return EncounterState(**dict(row._mapping))
+        state = EncounterState(**dict(row._mapping))
+        return state.model_copy(update={"boss_intent": boss_intent(state.id, state.round_number)})
 
     def record_category(self, category_id: str, name: str, source: str = "eventsub") -> None:
         if not category_id:
@@ -114,11 +115,11 @@ class GameRepository:
             """)).first()
         return self._encounter(row) if row else None
 
-    def start_encounter(self, category_id: str, boss_name: str, max_hp: int, boss_damage: int, round_seconds: int) -> EncounterState:
+    def start_encounter(self, category_id: str, boss_name: str, max_hp: int, boss_damage: int, round_seconds: int, party_integrity: int) -> EncounterState:
         if self.active_encounter():
             raise GameError("Ya hay un boss activo. Finalízalo o cancélalo antes de iniciar otro.")
         now = datetime.now(timezone.utc)
-        state = new_encounter(category_id, boss_name, max_hp, boss_damage, round_seconds, now)
+        state = new_encounter(category_id, boss_name, max_hp, boss_damage, round_seconds, party_integrity, now)
         with self.engine.begin() as connection:
             connection.execute(text("""
                 INSERT INTO game_encounters (id, twitch_category_id, boss_name, max_hp, current_hp, max_party_integrity,
@@ -154,13 +155,14 @@ class GameRepository:
         except IntegrityError:
             return "Ya registraste una acción en esta ronda."
 
-    def resolve_due_encounter(self) -> tuple[EncounterState, dict[str, int | str]] | None:
+    def resolve_due_encounter(self, force: bool = False) -> tuple[EncounterState, dict[str, int | str]] | None:
         now = datetime.now(timezone.utc)
         with self.engine.begin() as connection:
-            row = connection.execute(text("""
+            condition = "" if force else "AND round_ends_at <= :now"
+            row = connection.execute(text(f"""
                 SELECT id, COALESCE(twitch_category_id, '') AS category_id, boss_name, max_hp, current_hp,
                        max_party_integrity, party_integrity, round_number, round_seconds, boss_damage, round_ends_at, status
-                FROM game_encounters WHERE status = 'active' AND round_ends_at <= :now ORDER BY created_at DESC LIMIT 1 FOR UPDATE
+                FROM game_encounters WHERE status = 'active' {condition} ORDER BY created_at DESC LIMIT 1 FOR UPDATE
             """), {"now": now}).first()
             if not row:
                 return None
@@ -185,3 +187,17 @@ class GameRepository:
                 if reward.rowcount:
                     connection.execute(text("UPDATE game_players SET xp=xp+:xp, credits=credits+:credits WHERE twitch_user_id=:id"), {"xp": XP_PER_ACTION, "credits": CREDITS_PER_ACTION, "id": action.twitch_user_id})
         return updated, result
+
+    def cancel_active_encounter(self) -> EncounterState | None:
+        now = datetime.now(timezone.utc)
+        with self.engine.begin() as connection:
+            row = connection.execute(text("""
+                SELECT id, COALESCE(twitch_category_id, '') AS category_id, boss_name, max_hp, current_hp,
+                       max_party_integrity, party_integrity, round_number, round_seconds, boss_damage, round_ends_at, status
+                FROM game_encounters WHERE status = 'active' ORDER BY created_at DESC LIMIT 1 FOR UPDATE
+            """)).first()
+            if not row:
+                return None
+            state = self._encounter(row).model_copy(update={"status": "cancelled"})
+            connection.execute(text("UPDATE game_encounters SET status='cancelled', ended_at=:now, version=version+1 WHERE id=:id"), {"now": now, "id": state.id})
+        return state

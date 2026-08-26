@@ -335,11 +335,40 @@ async def start_game_encounter(payload: BossDefinitionInput, request: Request) -
     state = await request.app.state.stream_state.get()
     category_id = payload.category_id if payload.category_id is not None else state.category_id
     try:
-        encounter = await asyncio.to_thread(game_repository_or_503(request).start_encounter, category_id, payload.name, payload.max_hp, payload.base_party_damage, payload.round_seconds)
+        encounter = await asyncio.to_thread(game_repository_or_503(request).start_encounter, category_id, payload.name, payload.max_hp, payload.base_party_damage, payload.round_seconds, payload.party_integrity)
     except GameError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     await request.app.state.connections.broadcast({"type": "game.encounter.state", "data": encounter.model_dump(mode="json")})
+    if request.app.state.game_controller:
+        await request.app.state.game_controller.announce_encounter(encounter)
     return encounter
+
+
+@app.post("/api/game/encounter/resolve", response_model=EncounterState | None)
+async def resolve_game_encounter(request: Request) -> EncounterState | None:
+    require_admin_token(request)
+    controller: GameController | None = request.app.state.game_controller
+    if not controller:
+        game_repository_or_503(request)
+        return None
+    result = await controller.force_resolve()
+    return result[0] if result else None
+
+
+@app.delete("/api/game/encounter", response_model=EncounterState | None)
+async def cancel_game_encounter(request: Request) -> EncounterState | None:
+    require_admin_token(request)
+    encounter = await asyncio.to_thread(game_repository_or_503(request).cancel_active_encounter)
+    if encounter:
+        await request.app.state.connections.broadcast({"type": "game.encounter.state", "data": encounter.model_dump(mode="json")})
+    return encounter
+
+
+@app.get("/api/game/debug/chat")
+async def game_chat_debug(request: Request) -> list[dict[str, str]]:
+    require_admin_token(request)
+    controller: GameController | None = request.app.state.game_controller
+    return controller.command_logs() if controller else []
 
 
 @app.get("/api/game/items", response_model=list[ItemDefinition])

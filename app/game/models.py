@@ -28,6 +28,7 @@ class EncounterState(BaseModel):
     round_number: int
     round_seconds: int = 15
     boss_damage: int = 12
+    boss_intent: str = "attack"
     round_ends_at: datetime
     status: str
 
@@ -44,7 +45,8 @@ class BossDefinitionInput(BaseModel):
     name: str = Field(min_length=2, max_length=255)
     max_hp: int = Field(ge=100, le=1_000_000)
     base_party_damage: int = Field(default=12, ge=0, le=10_000)
-    round_seconds: int = Field(default=15, ge=5, le=120)
+    round_seconds: int = Field(default=30, ge=5, le=120)
+    party_integrity: int = Field(default=1000, ge=100, le=1_000_000)
 
 
 class ItemDefinitionInput(BaseModel):
