@@ -121,7 +121,7 @@ class GameController:
             state = "✓" if mission.completed else f"{mission.progress}/{mission.objective_target}"
             objective = mission.description or labels.get(mission.objective_type, "progreso")
             parts.append(f"{mission.cadence.upper()} {mission.name} {state}: {objective}")
-        suffix = "(No hay necesidad de spamear acciones, las misiones llevan un contro de tiempo) \n ".join(parts)
+        suffix = " // ".join(parts)
         return f"[GAME MASTER] {display_name} // {suffix}"[:500]
 
     async def _announce_completions(self, actor: ChatActor, completions: list[QuestCompletion]) -> None:
