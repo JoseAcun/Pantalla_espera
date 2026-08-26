@@ -5,16 +5,17 @@ from collections import deque
 from datetime import datetime, timezone
 from typing import Awaitable, Callable
 
-from app.game.models import ChatActor, EncounterState
+from app.game.models import ChatActor, EncounterState, QuestCompletion
 from app.game.repository import GameRepository
 from app.game.service import parse_command
 
 
 class GameController:
-    def __init__(self, repository: GameRepository, publish: Callable[[dict], Awaitable[None]], reply: Callable[[str], Awaitable[None]]) -> None:
+    def __init__(self, repository: GameRepository, publish: Callable[[dict], Awaitable[None]], reply: Callable[[str], Awaitable[None]], category_id: Callable[[], Awaitable[str]] | None = None) -> None:
         self.repository = repository
         self.publish = publish
         self.reply = reply
+        self.category_id = category_id
         self.last_reply_at = 0.0
         self.logs: deque[dict[str, str]] = deque(maxlen=200)
 
@@ -24,11 +25,15 @@ class GameController:
             return
         if event_type != "channel.chat.message":
             return
+        actor = ChatActor(user_id=event["chatter_user_id"], login=event.get("chatter_user_login", ""), display_name=event.get("chatter_user_name", "Viewer"))
+        category_id = await self.category_id() if self.category_id else ""
         command = parse_command(event.get("message", {}).get("text", ""))
         if not command:
+            completed = await self._thread(self.repository.record_chat_activity, actor, message_id, category_id)
+            if completed:
+                await self._announce_completions(actor, completed)
             return
         name, _arguments = command
-        actor = ChatActor(user_id=event["chatter_user_id"], login=event.get("chatter_user_login", ""), display_name=event.get("chatter_user_name", "Viewer"))
         result = "ignored"
         if name == "join":
             profile, created = await self._thread(self.repository.register_player, actor)
@@ -38,6 +43,15 @@ class GameController:
             profile = await self._thread(self.repository.player, actor.user_id)
             result = "stats returned" if profile else "missing profile"
             await self._respond(f"[GAME MASTER] {profile.display_name}: LV {profile.level} | XP {profile.xp} | CREDITS {profile.credits}." if profile else "[GAME MASTER] Usa !join para crear tu perfil.")
+        elif name in {"missions", "mission", "quests", "quest"}:
+            profile = await self._thread(self.repository.player, actor.user_id)
+            if not profile:
+                result = "missing profile"
+                await self._respond("[GAME MASTER] Usa !join para crear tu perfil antes de ver misiones.")
+            else:
+                missions = await self._thread(self.repository.player_quests, actor.user_id, category_id)
+                result = "missions returned"
+                await self._respond(self._missions_text(profile.display_name, missions))
         elif name == "boss":
             state = await self._thread(self.repository.active_encounter)
             result = "boss state returned" if state else "no active boss"
@@ -50,6 +64,10 @@ class GameController:
                 return
             response = await self._thread(self.repository.add_action, state.id, actor, name, message_id)
             result = response
+            if "registrado" in response:
+                completed = await self._thread(self.repository.record_raid_action, actor, message_id, state.category_id)
+                if completed:
+                    await self._announce_completions(actor, completed)
             # Successful actions are visible in the admin log, not echoed into chat one by one.
             if "registrado" not in response:
                 await self._respond(f"[GAME MASTER] {actor.display_name}: {response}")
@@ -92,6 +110,25 @@ class GameController:
         if not state:
             return "[GAME MASTER] No hay un boss activo."
         return f"[GAME MASTER] {state.boss_name}: {state.current_hp}/{state.max_hp} HP // PARTY {state.party_integrity}/{state.max_party_integrity} // ROUND {state.round_number}."
+
+    @staticmethod
+    def _missions_text(display_name: str, missions: list) -> str:
+        if not missions:
+            return f"[GAME MASTER] {display_name}: no hay misiones activas para esta categoría."
+        labels = {"chat_messages": "chat", "activity_windows": "ventanas", "stream_days": "directos", "raid_actions": "raids"}
+        parts = []
+        for mission in missions[:3]:
+            state = "✓" if mission.completed else f"{mission.progress}/{mission.objective_target}"
+            parts.append(f"{mission.cadence.upper()} {mission.name} {state} {labels.get(mission.objective_type, 'progreso')}")
+        suffix = " // ".join(parts)
+        return f"[GAME MASTER] {display_name} // {suffix}"[:500]
+
+    async def _announce_completions(self, actor: ChatActor, completions: list[QuestCompletion]) -> None:
+        rewards = []
+        for completion in completions:
+            item = f" + {completion.item_name}" if completion.item_name else ""
+            rewards.append(f"{completion.name}: +{completion.xp} XP +{completion.credits} C{item}")
+        await self._respond(f"[GAME MASTER] MISIÓN COMPLETADA // {actor.display_name} // {' // '.join(rewards)}", priority=True)
 
     async def _respond(self, message: str, priority: bool = False) -> None:
         # Successful combat actions stay in the debug view. Public commands are rate-limited.

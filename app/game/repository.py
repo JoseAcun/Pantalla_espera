@@ -1,6 +1,7 @@
 """MariaDB adapter for the first STREAM_OS RPG slice."""
 
 from datetime import datetime, timezone
+import random
 from typing import Any
 
 from sqlalchemy import create_engine, text
@@ -13,10 +14,12 @@ from app.game.models import (
     ItemDefinition,
     ItemDefinitionInput,
     PlayerProfile,
+    PlayerQuest,
+    QuestCompletion,
     QuestDefinition,
     QuestDefinitionInput,
 )
-from app.game.service import CREDITS_PER_ACTION, XP_PER_ACTION, GameError, boss_intent, new_encounter, resolve_round
+from app.game.service import CREDITS_PER_ACTION, XP_PER_ACTION, GAME_TIMEZONE, GameError, boss_intent, new_encounter, quest_period_key, resolve_round
 
 
 class GameRepository:
@@ -144,6 +147,138 @@ class GameRepository:
                 FROM game_players p JOIN twitch_users u ON u.twitch_user_id = p.twitch_user_id WHERE p.twitch_user_id = :id
             """), {"id": user_id}).first()
         return PlayerProfile(**dict(row._mapping)) if row else None
+
+    def player_quests(self, user_id: str, category_id: str = "") -> list[PlayerQuest]:
+        now = datetime.now(timezone.utc)
+        daily_key = quest_period_key("daily", now)
+        weekly_key = quest_period_key("weekly", now)
+        with self.engine.connect() as connection:
+            rows = connection.execute(text("""
+                SELECT q.id, q.cadence, q.name, q.description, q.objective_type, q.objective_target,
+                       q.reward_xp, q.reward_credits, q.reward_random_item,
+                       COALESCE(p.progress, 0) AS progress, p.completed_at IS NOT NULL AS completed
+                FROM game_quest_definitions q
+                LEFT JOIN game_player_quest_progress p ON p.twitch_user_id = :user_id
+                  AND p.quest_definition_id = q.id
+                  AND p.period_key = CASE WHEN q.cadence = 'weekly' THEN :weekly_key ELSE :daily_key END
+                WHERE q.enabled = TRUE
+                  AND (q.twitch_category_id IS NULL OR q.twitch_category_id = NULLIF(:category_id, ''))
+                ORDER BY FIELD(q.cadence, 'daily', 'weekly'), q.id
+            """), {"user_id": user_id, "category_id": category_id, "daily_key": daily_key, "weekly_key": weekly_key}).all()
+        return [PlayerQuest(**dict(row._mapping)) for row in rows]
+
+    def record_chat_activity(self, actor: ChatActor, message_id: str, category_id: str = "") -> list[QuestCompletion]:
+        """Credit one non-command chat message per minute, 20-minute window and stream day."""
+        now = datetime.now(timezone.utc)
+        local = now.astimezone(GAME_TIMEZONE)
+        window_minute = local.minute - local.minute % 20
+        activity_keys = {
+            "chat_messages": f"chat:{local:%Y%m%d%H%M}",
+            "activity_windows": f"window:{local:%Y%m%d%H}{window_minute:02d}",
+            "stream_days": f"stream-day:{local.date().isoformat()}",
+        }
+        with self.engine.begin() as connection:
+            self._upsert_actor(connection, actor, now)
+            if not connection.execute(text("SELECT 1 FROM game_players WHERE twitch_user_id = :id"), {"id": actor.user_id}).first():
+                return []
+            completions: list[QuestCompletion] = []
+            for objective_type, activity_key in activity_keys.items():
+                inserted = connection.execute(text("""
+                    INSERT IGNORE INTO game_player_activity
+                      (twitch_user_id, activity_type, activity_key, source_message_id, occurred_at)
+                    VALUES (:user_id, :activity_type, :activity_key, :message_id, :now)
+                """), {"user_id": actor.user_id, "activity_type": objective_type, "activity_key": activity_key, "message_id": message_id, "now": now})
+                if inserted.rowcount:
+                    completions.extend(self._advance_quests(connection, actor.user_id, category_id, objective_type, now))
+            connection.execute(text("UPDATE game_players SET last_active_at = :now WHERE twitch_user_id = :id"), {"now": now, "id": actor.user_id})
+        return completions
+
+    def record_raid_action(self, actor: ChatActor, message_id: str, category_id: str = "") -> list[QuestCompletion]:
+        now = datetime.now(timezone.utc)
+        with self.engine.begin() as connection:
+            inserted = connection.execute(text("""
+                INSERT IGNORE INTO game_player_activity
+                  (twitch_user_id, activity_type, activity_key, source_message_id, occurred_at)
+                VALUES (:user_id, 'raid_actions', :message_id, :message_id, :now)
+            """), {"user_id": actor.user_id, "message_id": message_id, "now": now})
+            if not inserted.rowcount:
+                return []
+            return self._advance_quests(connection, actor.user_id, category_id, "raid_actions", now)
+
+    def _advance_quests(self, connection: Any, user_id: str, category_id: str, objective_type: str, now: datetime) -> list[QuestCompletion]:
+        quests = connection.execute(text("""
+            SELECT id, cadence, name, objective_target, reward_xp, reward_credits, reward_random_item
+            FROM game_quest_definitions
+            WHERE enabled = TRUE AND objective_type = :objective_type
+              AND (twitch_category_id IS NULL OR twitch_category_id = NULLIF(:category_id, ''))
+        """), {"objective_type": objective_type, "category_id": category_id}).all()
+        completions: list[QuestCompletion] = []
+        for row in quests:
+            quest = dict(row._mapping)
+            period_key = quest_period_key(quest["cadence"], now)
+            progress_row = connection.execute(text("""
+                SELECT progress, completed_at FROM game_player_quest_progress
+                WHERE twitch_user_id = :user_id AND quest_definition_id = :quest_id AND period_key = :period_key
+                FOR UPDATE
+            """), {"user_id": user_id, "quest_id": quest["id"], "period_key": period_key}).first()
+            current = int(progress_row.progress) if progress_row else 0
+            if progress_row and progress_row.completed_at is not None:
+                continue
+            progress = min(int(quest["objective_target"]), current + 1)
+            completed = progress >= int(quest["objective_target"])
+            if progress_row:
+                connection.execute(text("""
+                    UPDATE game_player_quest_progress
+                    SET progress = :progress, completed_at = CASE WHEN :completed THEN :now ELSE NULL END
+                    WHERE twitch_user_id = :user_id AND quest_definition_id = :quest_id AND period_key = :period_key
+                """), {"progress": progress, "completed": completed, "now": now, "user_id": user_id, "quest_id": quest["id"], "period_key": period_key})
+            else:
+                connection.execute(text("""
+                    INSERT INTO game_player_quest_progress
+                      (twitch_user_id, quest_definition_id, period_key, progress, completed_at)
+                    VALUES (:user_id, :quest_id, :period_key, :progress, CASE WHEN :completed THEN :now ELSE NULL END)
+                """), {"user_id": user_id, "quest_id": quest["id"], "period_key": period_key, "progress": progress, "completed": completed, "now": now})
+            if not completed:
+                continue
+            source_id = f"quest:{quest['id']}:{period_key}"
+            reward = connection.execute(text("""
+                INSERT IGNORE INTO game_rewards (twitch_user_id, source_type, source_id, xp, credits)
+                VALUES (:user_id, 'quest', :source_id, :xp, :credits)
+            """), {"user_id": user_id, "source_id": source_id, "xp": quest["reward_xp"], "credits": quest["reward_credits"]})
+            if not reward.rowcount:
+                continue
+            connection.execute(text("""
+                UPDATE game_players
+                SET xp = xp + :xp, credits = credits + :credits,
+                    level = 1 + FLOOR((xp + :xp) / 100)
+                WHERE twitch_user_id = :user_id
+            """), {"xp": quest["reward_xp"], "credits": quest["reward_credits"], "user_id": user_id})
+            item_name = ""
+            if quest["reward_random_item"]:
+                item = self._random_item(connection, category_id)
+                if item:
+                    connection.execute(text("""
+                        INSERT IGNORE INTO game_player_items (twitch_user_id, item_definition_id, source_type, source_id)
+                        VALUES (:user_id, :item_id, 'quest', :source_id)
+                    """), {"user_id": user_id, "item_id": item["id"], "source_id": source_id})
+                    connection.execute(text("""
+                        UPDATE game_player_quest_progress SET reward_item_definition_id = :item_id
+                        WHERE twitch_user_id = :user_id AND quest_definition_id = :quest_id AND period_key = :period_key
+                    """), {"item_id": item["id"], "user_id": user_id, "quest_id": quest["id"], "period_key": period_key})
+                    item_name = item["name"]
+            completions.append(QuestCompletion(name=quest["name"], xp=quest["reward_xp"], credits=quest["reward_credits"], item_name=item_name))
+        return completions
+
+    @staticmethod
+    def _random_item(connection: Any, category_id: str) -> dict[str, Any] | None:
+        rows = connection.execute(text("""
+            SELECT id, name, weight FROM game_item_definitions
+            WHERE enabled = TRUE AND (twitch_category_id IS NULL OR twitch_category_id = NULLIF(:category_id, ''))
+        """), {"category_id": category_id}).all()
+        if not rows:
+            return None
+        values = [dict(row._mapping) for row in rows]
+        return random.choices(values, weights=[item["weight"] for item in values], k=1)[0]
 
     def active_encounter(self) -> EncounterState | None:
         with self.engine.connect() as connection:

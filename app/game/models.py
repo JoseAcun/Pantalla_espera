@@ -83,3 +83,24 @@ class QuestDefinitionInput(BaseModel):
 class QuestDefinition(QuestDefinitionInput):
     id: int
     enabled: bool = True
+
+
+class PlayerQuest(BaseModel):
+    id: int
+    cadence: str
+    name: str
+    description: str = ""
+    objective_type: str
+    objective_target: int
+    reward_xp: int
+    reward_credits: int
+    reward_random_item: bool = False
+    progress: int = 0
+    completed: bool = False
+
+
+class QuestCompletion(BaseModel):
+    name: str
+    xp: int
+    credits: int
+    item_name: str = ""

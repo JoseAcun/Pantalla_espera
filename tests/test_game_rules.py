@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 import unittest
 
 from app.game.models import EncounterState
-from app.game.service import ACTION_VALUES, resolve_round
+from app.game.service import ACTION_VALUES, quest_period_key, resolve_round
 
 
 def encounter() -> EncounterState:
@@ -35,3 +35,9 @@ class RaidRuleTests(unittest.TestCase):
         _, state = resolve_round(encounter(), [], 100, datetime.now(timezone.utc))
         self.assertEqual(state.status, "defeat")
         self.assertEqual(state.party_integrity, 0)
+
+    def test_quest_periods_use_bogota_calendar(self) -> None:
+        # 00:30 UTC is still the previous day in Bogotá (UTC-5).
+        now = datetime(2026, 8, 27, 0, 30, tzinfo=timezone.utc)
+        self.assertEqual(quest_period_key("daily", now), "day:2026-08-26")
+        self.assertEqual(quest_period_key("weekly", now), "week:2026-35")

@@ -11,6 +11,9 @@ from app.game.models import ChatActor, EncounterState, PlayerProfile
 XP_PER_ACTION = 20
 CREDITS_PER_ACTION = 8
 ACTION_VALUES = {"attack": 24, "defend": 8, "heal": 10}
+# Colombia does not observe daylight saving time.  A fixed offset also keeps the
+# container independent from optional OS/Python tzdata packages.
+GAME_TIMEZONE = timezone(timedelta(hours=-5), name="America/Bogota")
 
 
 class GameError(RuntimeError):
@@ -22,6 +25,15 @@ def parse_command(text: str) -> tuple[str, list[str]] | None:
     if not parts or not parts[0].startswith("!"):
         return None
     return parts[0][1:], parts[1:]
+
+
+def quest_period_key(cadence: str, now: datetime) -> str:
+    """Stable local period names so daily/weekly resets follow the stream's timezone."""
+    local = now.astimezone(GAME_TIMEZONE)
+    if cadence == "weekly":
+        year, week, _ = local.isocalendar()
+        return f"week:{year}-{week:02d}"
+    return f"day:{local.date().isoformat()}"
 
 
 def boss_intent(encounter_id: str, round_number: int) -> str:

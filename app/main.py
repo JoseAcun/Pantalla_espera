@@ -128,7 +128,10 @@ async def lifespan(app: FastAPI):
     if app.state.repository:
         await asyncio.to_thread(app.state.repository.initialize)
         logger.info("MariaDB event persistence enabled")
-    app.state.game_controller = GameController(app.state.game_repository, app.state.connections.broadcast, app.state.twitch.send_chat_message) if app.state.game_repository else None
+    async def current_game_category() -> str:
+        return (await app.state.stream_state.get()).category_id
+
+    app.state.game_controller = GameController(app.state.game_repository, app.state.connections.broadcast, app.state.twitch.send_chat_message, current_game_category) if app.state.game_repository else None
     app.state.eventsub = EventSubClient(app.state.twitch, app.state.stream_state, app.state.connections.broadcast, app.state.repository, app.state.game_controller.handle_twitch_event if app.state.game_controller else None)
     if app.state.twitch.access_token():
         try:
