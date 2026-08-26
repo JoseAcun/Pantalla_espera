@@ -62,3 +62,24 @@ class ItemDefinitionInput(BaseModel):
 class ItemDefinition(ItemDefinitionInput):
     id: int
     enabled: bool = True
+
+
+class QuestDefinitionInput(BaseModel):
+    """A reusable personal quest template managed from Game Master."""
+
+    category_id: str | None = None
+    cadence: str = Field(pattern=r"^(daily|weekly)$")
+    name: str = Field(min_length=2, max_length=255)
+    description: str = Field(default="", max_length=500)
+    objective_type: str = Field(
+        pattern=r"^(chat_messages|activity_windows|stream_days|raid_actions)$"
+    )
+    objective_target: int = Field(ge=1, le=10_000)
+    reward_xp: int = Field(default=0, ge=0, le=1_000_000)
+    reward_credits: int = Field(default=0, ge=0, le=1_000_000)
+    reward_random_item: bool = False
+
+
+class QuestDefinition(QuestDefinitionInput):
+    id: int
+    enabled: bool = True

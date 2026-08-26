@@ -6,7 +6,16 @@ from typing import Any
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
 
-from app.game.models import CategoryContent, ChatActor, EncounterState, ItemDefinition, ItemDefinitionInput, PlayerProfile
+from app.game.models import (
+    CategoryContent,
+    ChatActor,
+    EncounterState,
+    ItemDefinition,
+    ItemDefinitionInput,
+    PlayerProfile,
+    QuestDefinition,
+    QuestDefinitionInput,
+)
 from app.game.service import CREDITS_PER_ACTION, XP_PER_ACTION, GameError, boss_intent, new_encounter, resolve_round
 
 
@@ -77,6 +86,36 @@ class GameRepository:
                 FROM game_item_definitions WHERE id=:id
             """), {"id": result.lastrowid}).one()
         return ItemDefinition(**dict(row._mapping))
+
+    def quests(self) -> list[QuestDefinition]:
+        with self.engine.connect() as connection:
+            rows = connection.execute(text("""
+                SELECT id, twitch_category_id AS category_id, cadence, name, description,
+                       objective_type, objective_target, reward_xp, reward_credits,
+                       reward_random_item, enabled
+                FROM game_quest_definitions
+                ORDER BY cadence, created_at DESC
+            """)).all()
+        return [QuestDefinition(**dict(row._mapping)) for row in rows]
+
+    def create_quest(self, quest: QuestDefinitionInput) -> QuestDefinition:
+        with self.engine.begin() as connection:
+            result = connection.execute(text("""
+                INSERT INTO game_quest_definitions (
+                    twitch_category_id, cadence, name, description, objective_type,
+                    objective_target, reward_xp, reward_credits, reward_random_item
+                ) VALUES (
+                    NULLIF(:category_id, ''), :cadence, :name, :description, :objective_type,
+                    :objective_target, :reward_xp, :reward_credits, :reward_random_item
+                )
+            """), quest.model_dump())
+            row = connection.execute(text("""
+                SELECT id, twitch_category_id AS category_id, cadence, name, description,
+                       objective_type, objective_target, reward_xp, reward_credits,
+                       reward_random_item, enabled
+                FROM game_quest_definitions WHERE id = :id
+            """), {"id": result.lastrowid}).one()
+        return QuestDefinition(**dict(row._mapping))
 
     def _upsert_actor(self, connection: Any, actor: ChatActor, now: datetime) -> None:
         connection.execute(text("""

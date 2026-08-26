@@ -15,7 +15,15 @@ from app.config import get_settings
 from app.eventsub import EventSubClient
 from app.database import EventRepository
 from app.game.controller import GameController
-from app.game.models import BossDefinitionInput, CategoryContent, EncounterState, ItemDefinition, ItemDefinitionInput
+from app.game.models import (
+    BossDefinitionInput,
+    CategoryContent,
+    EncounterState,
+    ItemDefinition,
+    ItemDefinitionInput,
+    QuestDefinition,
+    QuestDefinitionInput,
+)
 from app.game.repository import GameRepository
 from app.game.service import GameError
 from app.models import StreamState, SubscriptionEvent
@@ -388,6 +396,18 @@ async def game_items(request: Request) -> list[ItemDefinition]:
 async def create_game_item(payload: ItemDefinitionInput, request: Request) -> ItemDefinition:
     require_admin_token(request)
     return await asyncio.to_thread(game_repository_or_503(request).create_item, payload)
+
+
+@app.get("/api/game/quests", response_model=list[QuestDefinition])
+async def game_quests(request: Request) -> list[QuestDefinition]:
+    require_admin_token(request)
+    return await asyncio.to_thread(game_repository_or_503(request).quests)
+
+
+@app.post("/api/game/quests", response_model=QuestDefinition)
+async def create_game_quest(payload: QuestDefinitionInput, request: Request) -> QuestDefinition:
+    require_admin_token(request)
+    return await asyncio.to_thread(game_repository_or_503(request).create_quest, payload)
 
 
 @app.get("/api/pokemon/team", response_model=PokemonTeam)
