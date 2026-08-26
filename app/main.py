@@ -14,6 +14,10 @@ from pydantic import BaseModel, Field
 from app.config import get_settings
 from app.eventsub import EventSubClient
 from app.database import EventRepository
+from app.game.controller import GameController
+from app.game.models import BossDefinitionInput, CategoryContent, EncounterState, ItemDefinition, ItemDefinitionInput
+from app.game.repository import GameRepository
+from app.game.service import GameError
 from app.models import StreamState, SubscriptionEvent
 from app.pokemon import MAX_TEAM_SIZE, PokeApiClient, PokemonError, PokemonTeam, PokemonTeamStore
 from app.state import StreamStateStore
@@ -34,6 +38,11 @@ class PokemonMemberRequest(BaseModel):
     nickname: str = Field(default="", max_length=32)
 
 
+class CategorySettingRequest(BaseModel):
+    theme_key: str = Field(default="stream_os_generic", min_length=2, max_length=64)
+    enabled: bool = True
+
+
 async def refresh_metrics_periodically(app: FastAPI) -> None:
     """Poll the small live-metrics subset of Helix once a minute."""
     while True:
@@ -44,9 +53,21 @@ async def refresh_metrics_periodically(app: FastAPI) -> None:
             current = await app.state.stream_state.get()
             refreshed = await app.state.twitch.refresh_live_metrics(current)
             await app.state.stream_state.replace(refreshed)
+            await record_stream_category(app, refreshed, "poll")
             await app.state.connections.broadcast({"type": "stream_state", "data": refreshed.model_dump(mode="json")})
         except Exception as error:
             logger.warning("Could not refresh live metrics: %s", error)
+
+
+async def game_tick_periodically(app: FastAPI) -> None:
+    while True:
+        await asyncio.sleep(1)
+        controller: GameController | None = app.state.game_controller
+        if controller:
+            try:
+                await controller.tick()
+            except Exception:
+                logger.exception("Could not resolve a game round")
 
 
 async def persist_hydrated_follower(app: FastAPI, state: StreamState) -> None:
@@ -56,6 +77,14 @@ async def persist_hydrated_follower(app: FastAPI, state: StreamState) -> None:
             await asyncio.to_thread(app.state.repository.record_hydrated_follower, state)
         except Exception:
             logger.exception("Could not persist the follower recovered from Helix")
+
+
+async def record_stream_category(app: FastAPI, state: StreamState, source: str) -> None:
+    if app.state.game_repository and state.category_id:
+        try:
+            await asyncio.to_thread(app.state.game_repository.record_category, state.category_id, state.category, source)
+        except Exception:
+            logger.exception("Could not persist the Twitch category")
 
 
 def require_admin_token(request: Request) -> None:
@@ -87,25 +116,32 @@ async def lifespan(app: FastAPI):
     app.state.oauth_states = {}
     database_url = get_settings().database_url
     app.state.repository = EventRepository(database_url) if database_url else None
+    app.state.game_repository = GameRepository(database_url) if database_url else None
     if app.state.repository:
         await asyncio.to_thread(app.state.repository.initialize)
         logger.info("MariaDB event persistence enabled")
-    app.state.eventsub = EventSubClient(app.state.twitch, app.state.stream_state, app.state.connections.broadcast, app.state.repository)
+    app.state.game_controller = GameController(app.state.game_repository, app.state.connections.broadcast, app.state.twitch.send_chat_message) if app.state.game_repository else None
+    app.state.eventsub = EventSubClient(app.state.twitch, app.state.stream_state, app.state.connections.broadcast, app.state.repository, app.state.game_controller.handle_twitch_event if app.state.game_controller else None)
     if app.state.twitch.access_token():
         try:
             hydrated = await app.state.twitch.hydrate_state()
             await app.state.stream_state.replace(hydrated)
             await persist_hydrated_follower(app, hydrated)
+            await record_stream_category(app, hydrated, "startup")
             app.state.eventsub.start()
         except Exception as error:
             logger.warning("Could not restore Twitch state at startup: %s", error)
     await app.state.eventsub.restore_from_repository()
     app.state.metrics_task = asyncio.create_task(refresh_metrics_periodically(app), name="twitch-live-metrics")
+    app.state.game_task = asyncio.create_task(game_tick_periodically(app), name="stream-os-game")
     logger.info("Overlay backend started. Open /auth/twitch/start to connect Twitch.")
     yield
     app.state.metrics_task.cancel()
+    app.state.game_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await app.state.metrics_task
+    with contextlib.suppress(asyncio.CancelledError):
+        await app.state.game_task
     await app.state.eventsub.stop()
 
 
@@ -170,6 +206,7 @@ async def twitch_auth_poll(request: Request) -> dict[str, object]:
         stream_state = await request.app.state.twitch.hydrate_state()
         await request.app.state.stream_state.replace(stream_state)
         await persist_hydrated_follower(request.app, stream_state)
+        await record_stream_category(request.app, stream_state, "oauth")
         await request.app.state.eventsub.restore_from_repository()
         await request.app.state.connections.broadcast({"type": "stream_state", "data": stream_state.model_dump(mode="json")})
         request.app.state.eventsub.start()
@@ -195,6 +232,7 @@ async def twitch_auth_callback(request: Request, code: str | None = None, state:
         stream_state = await request.app.state.twitch.hydrate_state()
         await request.app.state.stream_state.replace(stream_state)
         await persist_hydrated_follower(request.app, stream_state)
+        await record_stream_category(request.app, stream_state, "oauth")
         await request.app.state.connections.broadcast({"type": "stream_state", "data": stream_state.model_dump(mode="json")})
         request.app.state.eventsub.start()
     except TwitchError as exc:
@@ -262,8 +300,58 @@ async def twitch_sync(request: Request) -> StreamState:
         raise HTTPException(status_code=502, detail=str(error)) from error
     await request.app.state.stream_state.replace(state)
     await persist_hydrated_follower(request.app, state)
+    await record_stream_category(request.app, state, "sync")
     await request.app.state.connections.broadcast({"type": "stream_state", "data": state.model_dump(mode="json")})
     return state
+
+
+def game_repository_or_503(request: Request) -> GameRepository:
+    repository: GameRepository | None = request.app.state.game_repository
+    if not repository:
+        raise HTTPException(status_code=503, detail="DATABASE_URL no está configurada para el RPG.")
+    return repository
+
+
+@app.get("/api/game/encounter", response_model=EncounterState | None)
+async def game_encounter(request: Request) -> EncounterState | None:
+    return await asyncio.to_thread(game_repository_or_503(request).active_encounter)
+
+
+@app.get("/api/game/categories", response_model=list[CategoryContent])
+async def game_categories(request: Request) -> list[CategoryContent]:
+    require_admin_token(request)
+    return await asyncio.to_thread(game_repository_or_503(request).categories)
+
+
+@app.put("/api/game/categories/{category_id}", response_model=CategoryContent)
+async def save_game_category(category_id: str, payload: CategorySettingRequest, request: Request) -> CategoryContent:
+    require_admin_token(request)
+    return await asyncio.to_thread(game_repository_or_503(request).save_category_setting, category_id, payload.theme_key, payload.enabled)
+
+
+@app.post("/api/game/encounter", response_model=EncounterState)
+async def start_game_encounter(payload: BossDefinitionInput, request: Request) -> EncounterState:
+    require_admin_token(request)
+    state = await request.app.state.stream_state.get()
+    category_id = payload.category_id if payload.category_id is not None else state.category_id
+    try:
+        encounter = await asyncio.to_thread(game_repository_or_503(request).start_encounter, category_id, payload.name, payload.max_hp, payload.base_party_damage, payload.round_seconds)
+    except GameError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    await request.app.state.connections.broadcast({"type": "game.encounter.state", "data": encounter.model_dump(mode="json")})
+    return encounter
+
+
+@app.get("/api/game/items", response_model=list[ItemDefinition])
+async def game_items(request: Request) -> list[ItemDefinition]:
+    require_admin_token(request)
+    return await asyncio.to_thread(game_repository_or_503(request).items)
+
+
+@app.post("/api/game/items", response_model=ItemDefinition)
+async def create_game_item(payload: ItemDefinitionInput, request: Request) -> ItemDefinition:
+    require_admin_token(request)
+    return await asyncio.to_thread(game_repository_or_503(request).create_item, payload)
 
 
 @app.get("/api/pokemon/team", response_model=PokemonTeam)
@@ -322,6 +410,16 @@ async def pokemon_overlay() -> FileResponse:
 @app.get("/admin/pokemon", include_in_schema=False)
 async def pokemon_admin() -> FileResponse:
     return FileResponse("app/static/pokemon/admin.html")
+
+
+@app.get("/overlay/game/boss", include_in_schema=False)
+async def game_boss_overlay() -> FileResponse:
+    return FileResponse("app/static/game/overlay.html")
+
+
+@app.get("/admin/game", include_in_schema=False)
+async def game_admin() -> FileResponse:
+    return FileResponse("app/static/game/admin.html")
 
 
 @app.websocket("/ws/overlay")

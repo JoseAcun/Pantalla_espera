@@ -19,9 +19,10 @@ EVENTSUB_URL = "wss://eventsub.wss.twitch.tv/ws"
 
 
 class EventSubClient:
-    def __init__(self, twitch: TwitchClient, state: StreamStateStore, publish: Callable[[dict], Awaitable[None]], repository: EventRepository | None = None) -> None:
+    def __init__(self, twitch: TwitchClient, state: StreamStateStore, publish: Callable[[dict], Awaitable[None]], repository: EventRepository | None = None, game_handler: Callable[[str, dict, str], Awaitable[None]] | None = None) -> None:
         self.twitch, self.state, self.publish = twitch, state, publish
         self.repository = repository
+        self.game_handler = game_handler
         self.task: asyncio.Task | None = None
         self.connected = False
 
@@ -68,14 +69,19 @@ class EventSubClient:
                 self.connected = False
 
     async def _subscribe(self, session_id: str) -> None:
-        broadcaster_id = self.twitch.settings.twitch_broadcaster_id or (await self.twitch.validate_or_refresh())["user_id"]
-        definitions = (
+        validation = await self.twitch.validate_or_refresh()
+        broadcaster_id = self.twitch.settings.twitch_broadcaster_id or validation["user_id"]
+        definitions = [
             ("channel.follow", "2", {"broadcaster_user_id": broadcaster_id, "moderator_user_id": broadcaster_id}),
             ("channel.subscribe", "1", {"broadcaster_user_id": broadcaster_id}),
             ("channel.cheer", "1", {"broadcaster_user_id": broadcaster_id}),
             ("channel.raid", "1", {"to_broadcaster_user_id": broadcaster_id}),
             ("channel.update", "2", {"broadcaster_user_id": broadcaster_id}),
-        )
+        ]
+        if "user:read:chat" in validation.get("scopes", []):
+            definitions.append(("channel.chat.message", "1", {"broadcaster_user_id": broadcaster_id, "user_id": validation["user_id"]}))
+        else:
+            logger.warning("Chat RPG disabled until Twitch OAuth includes user:read:chat")
         for event_type, version, condition in definitions:
             await self.twitch.create_eventsub_subscription(event_type, version, condition, session_id)
 
@@ -93,6 +99,8 @@ class EventSubClient:
             )
             if not is_new:
                 return
+        if self.game_handler:
+            await self.game_handler(event_type, event, message["metadata"]["message_id"])
         changes, data = self._event_changes(event_type, event, now)
         if not changes:
             return
@@ -119,7 +127,7 @@ class EventSubClient:
             changes["last_raid"] = RaidEvent(**data)
         elif event_type == "channel.update":
             data = {"title": event["title"], "category": event.get("category_name", "")}
-            changes.update(game=event.get("category_name", "NO GAME SELECTED"), category=event.get("category_name", ""))
+            changes.update(game=event.get("category_name", "NO GAME SELECTED"), category=event.get("category_name", ""), category_id=event.get("category_id", ""))
         else:
             return {}, {}
         return changes, data

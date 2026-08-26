@@ -39,6 +39,7 @@ class StreamState(BaseModel):
     streamer: str = "STREAMER"
     game: str = "NO GAME SELECTED"
     category: str = ""
+    category_id: str = ""
     status: str = "AFK"
     episode: str = ""
     custom_message: str = ""

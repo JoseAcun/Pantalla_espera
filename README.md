@@ -176,6 +176,12 @@ Para OBS, usa `http://192.168.1.50:8010/overlay/brb` como Browser Source. No exp
 
 Para una barra discreta sobre el stream (fondo transparente y datos resumidos en la parte inferior), añade otra Browser Source con `http://192.168.1.50:8010/overlay/stream` y el mismo tamaño de tu lienzo, por ejemplo 1920×1080.
 
+### STREAM_OS RPG (MVP de raid)
+
+Ejecuta `db/002_game_schema.sql` una vez en MariaDB después de la migración inicial. Abre `http://IP_DE_LA_PI:8010/admin/game`, introduce `OVERLAY_ADMIN_TOKEN` y configura las categorías que Twitch haya detectado; cada una tiene su propio tema y contenido futuro. Desde esa misma vista puedes iniciar el boss de prueba de la categoría actual.
+
+Los espectadores se registran con `!join` y participan una vez por ronda mediante `!attack`, `!defend` o `!heal`. La fuente de OBS `http://IP_DE_LA_PI:8010/overlay/game/boss` muestra solo el estado colectivo. Después de desplegar esta versión debes renovar OAuth para conceder `user:read:chat` y `user:write:chat`; sin esos permisos el resto del overlay seguirá funcionando, pero el Game Master no recibirá ni podrá responder mensajes.
+
 ### Equipo Pokémon
 
 Abre `http://192.168.1.50:8010/admin/pokemon`, escribe el valor de `OVERLAY_ADMIN_TOKEN`, y configura hasta seis Pokémon con apodo opcional. Al guardar, el backend consulta PokéAPI y conserva el sprite en el volumen `/data`; por ello el overlay sigue mostrando el equipo aunque PokéAPI no esté disponible durante el stream. En OBS añade una Browser Source transparente con `http://192.168.1.50:8010/overlay/pokemon`, a la resolución de tu lienzo. La barra lateral se actualiza en vivo al guardar un cambio.

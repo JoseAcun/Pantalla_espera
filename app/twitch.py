@@ -16,7 +16,7 @@ TOKEN_URL = "https://id.twitch.tv/oauth2/token"
 AUTHORIZE_URL = "https://id.twitch.tv/oauth2/authorize"
 VALIDATE_URL = "https://id.twitch.tv/oauth2/validate"
 HELIX_URL = "https://api.twitch.tv/helix"
-REQUIRED_SCOPES = ("moderator:read:followers", "channel:read:subscriptions", "bits:read")
+REQUIRED_SCOPES = ("moderator:read:followers", "channel:read:subscriptions", "bits:read", "user:read:chat", "user:write:chat")
 
 
 class TwitchError(RuntimeError):
@@ -155,6 +155,7 @@ class TwitchClient:
             streamer=user.get("display_name", "STREAMER"),
             game=stream.get("game_name") or channel.get("game_name") or "NO GAME SELECTED",
             category=stream.get("game_name") or channel.get("game_name") or "",
+            category_id=stream.get("game_id") or channel.get("game_id") or "",
             status=self.settings.overlay_status,
             episode=self.settings.overlay_episode,
             custom_message=self.settings.overlay_custom_message,
@@ -186,6 +187,7 @@ class TwitchClient:
             "stream_started_at": stream.get("started_at"),
             "game": stream.get("game_name") or current.game,
             "category": stream.get("game_name") or current.category,
+            "category_id": stream.get("game_id") or current.category_id,
         })
 
     async def user_by_login(self, login: str) -> dict[str, Any]:
@@ -200,6 +202,17 @@ class TwitchClient:
         if not users:
             raise TwitchError("No encontré ningún usuario de Twitch con ese nick.")
         return users[0]
+
+    async def send_chat_message(self, message: str) -> None:
+        """Send the Game Master response as the authenticated broadcaster account."""
+        validation = await self.validate_or_refresh()
+        broadcaster_id = self.settings.twitch_broadcaster_id or validation["user_id"]
+        headers = {"Client-Id": self.settings.twitch_client_id or "", "Authorization": f"Bearer {self.access_token()}"}
+        payload = {"broadcaster_id": broadcaster_id, "sender_id": validation["user_id"], "message": message[:500]}
+        async with httpx.AsyncClient(timeout=15, headers=headers) as client:
+            response = await client.post(f"{HELIX_URL}/chat/messages", json=payload)
+        if response.is_error or not response.json().get("data", [{}])[0].get("is_sent", False):
+            raise TwitchError("No se pudo enviar la respuesta del Game Master al chat.")
 
     async def create_eventsub_subscription(self, event_type: str, version: str, condition: dict[str, str], session_id: str) -> None:
         """Create an EventSub subscription tied to Twitch's EventSub WebSocket."""
