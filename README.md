@@ -182,6 +182,23 @@ Ejecuta `db/002_game_schema.sql` una vez en MariaDB después de la migración in
 
 Los espectadores se registran con `!join` y participan una vez por ronda mediante `!attack`, `!defend` o `!heal`. La fuente de OBS `http://IP_DE_LA_PI:8010/overlay/game/boss` muestra solo el estado colectivo. Después de desplegar esta versión debes renovar OAuth para conceder `user:read:chat` y `user:write:chat`; sin esos permisos el resto del overlay seguirá funcionando, pero el Game Master no recibirá ni podrá responder mensajes.
 
+### BRB Community Dashboard
+
+Después de aplicar las migraciones RPG anteriores, ejecuta `db/007_community_dashboard.sql` una vez. La pantalla `http://IP_DE_LA_PI:8010/overlay/brb` sigue mostrando el estado actual del stream y rota, solo cuando hay datos, entre misiones activas, el registro público de actividad y el ranking de temporada. Si MariaDB no está disponible, la BRB conserva el módulo de estado sin interrumpirse.
+
+En `http://IP_DE_LA_PI:8010/admin/game`, usando `OVERLAY_ADMIN_TOKEN`, crea una temporada con inicio y cierre que incluyan la hora actual. El ranking no aparece hasta que exista una temporada activa; cuenta exclusivamente misiones completadas y XP de recompensas dentro de sus fechas. No se elimina el historial al desactivarla.
+
+Los eventos públicos se generan una sola vez para `!join`, completaciones de misión y aumentos de nivel. No se publican mensajes de chat, identificadores internos ni los buckets anti-spam. El endpoint público que consume BRB es `GET /api/game/community-dashboard`; las rutas de administración de temporadas requieren el token.
+
+En una Pi con MariaDB en el contenedor `mariadb`, aplica la migración así:
+
+```bash
+read -rsp "Clave MariaDB: " DB_PASSWORD; echo
+docker exec -i -e MYSQL_PWD="$DB_PASSWORD" mariadb \
+  mariadb -u root twitch_overlay < db/007_community_dashboard.sql
+unset DB_PASSWORD
+```
+
 ### Equipo Pokémon
 
 Abre `http://192.168.1.50:8010/admin/pokemon`, escribe el valor de `OVERLAY_ADMIN_TOKEN`, y configura hasta seis Pokémon con apodo opcional. Al guardar, el backend consulta PokéAPI y conserva el sprite en el volumen `/data`; por ello el overlay sigue mostrando el equipo aunque PokéAPI no esté disponible durante el stream. En OBS añade una Browser Source transparente con `http://192.168.1.50:8010/overlay/pokemon`, a la resolución de tu lienzo. La barra lateral se actualiza en vivo al guardar un cambio.

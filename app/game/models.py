@@ -1,6 +1,6 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ChatActor(BaseModel):
@@ -104,7 +104,89 @@ class PlayerQuest(BaseModel):
 
 
 class QuestCompletion(BaseModel):
+    quest_id: int
+    period_key: str
     name: str
     xp: int
     credits: int
     item_name: str = ""
+    level_before: int = 1
+    level_after: int = 1
+    public_events: list["PublicGameEvent"] = Field(default_factory=list)
+
+
+class PublicGameEvent(BaseModel):
+    """A deliberately small, broadcast-safe RPG activity record."""
+
+    id: int
+    event_type: str
+    display_name: str
+    title: str
+    detail: str = ""
+    occurred_at: datetime
+
+
+class CommunityQuest(BaseModel):
+    id: int
+    cadence: str
+    name: str
+    description: str = ""
+    objective_type: str
+    objective_target: int
+    reward_xp: int
+    reward_credits: int
+    period_key: str
+    participants: int = 0
+    completions: int = 0
+    recent_completers: list["CommunityCompleter"] = Field(default_factory=list)
+
+
+class CommunityCompleter(BaseModel):
+    display_name: str
+    completed_at: datetime
+
+
+class SeasonInput(BaseModel):
+    name: str = Field(min_length=2, max_length=100)
+    slug: str = Field(min_length=2, max_length=64, pattern=r"^[a-z0-9]+(?:[-_][a-z0-9]+)*$")
+    starts_at: datetime
+    ends_at: datetime
+    active: bool = True
+
+    @field_validator("starts_at", "ends_at")
+    @classmethod
+    def require_utc_aware_datetime(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("La fecha debe incluir zona horaria.")
+        return value.astimezone(timezone.utc)
+
+
+class Season(BaseModel):
+    id: int
+    name: str
+    slug: str
+    starts_at: datetime
+    ends_at: datetime
+    active: bool
+
+
+class SeasonLeader(BaseModel):
+    rank: int
+    display_name: str
+    missions_completed: int
+    season_xp: int
+
+
+class CommunitySeason(BaseModel):
+    name: str
+    starts_at: datetime
+    ends_at: datetime
+    days_remaining: int
+    leaders: list[SeasonLeader] = Field(default_factory=list)
+
+
+class CommunityDashboard(BaseModel):
+    generated_at: datetime
+    quests: list[CommunityQuest] = Field(default_factory=list)
+    user_log: list[PublicGameEvent] = Field(default_factory=list)
+    season: CommunitySeason | None = None

@@ -36,9 +36,11 @@ class GameController:
         name, _arguments = command
         result = "ignored"
         if name == "join":
-            profile, created = await self._thread(self.repository.register_player, actor)
+            profile, created, public_event = await self._thread(self.repository.register_player, actor)
             result = "registered" if created else "profile restored"
             await self._respond(f"[GAME MASTER] {'Registro completado' if created else 'Perfil recuperado'}, {profile.display_name}. Nivel {profile.level}.")
+            if public_event:
+                await self._publish_community_events([public_event])
         elif name in {"stats", "profile"}:
             profile = await self._thread(self.repository.player, actor.user_id)
             result = "stats returned" if profile else "missing profile"
@@ -130,6 +132,15 @@ class GameController:
             item = f" + {completion.item_name}" if completion.item_name else ""
             rewards.append(f"{completion.name}: +{completion.xp} XP +{completion.credits} C{item}")
         await self._respond(f"[GAME MASTER] MISIÓN COMPLETADA // {actor.display_name} // {' // '.join(rewards)}", priority=True)
+        public_events = [event for completion in completions for event in completion.public_events]
+        if public_events:
+            await self._publish_community_events(public_events)
+
+    async def _publish_community_events(self, events: list) -> None:
+        """Keep browser updates small: the BRB refetches the bounded snapshot."""
+        for event in events:
+            await self.publish({"type": "game.community.event", "data": event.model_dump(mode="json")})
+        await self.publish({"type": "game.community.refresh", "data": {}})
 
     async def _respond(self, message: str, priority: bool = False) -> None:
         # Successful combat actions stay in the debug view. Public commands are rate-limited.

@@ -1,61 +1,32 @@
 const elements = {
-  connection: document.querySelector('#connection'), streamer: document.querySelector('#streamer'),
-  status: document.querySelector('#stream-status'), game: document.querySelector('#game'),
-  episode: document.querySelector('#episode'), command: document.querySelector('#typed-command'),
-  message: document.querySelector('#message'), progress: document.querySelector('#progress-bar'),
-  follower: document.querySelector('#last-follower'), subscriber: document.querySelector('#last-subscriber'),
-  cheer: document.querySelector('#last-cheer'), raid: document.querySelector('#last-raid'),
-  viewers: document.querySelector('#viewer-count'), uptime: document.querySelector('#stream-uptime'),
+  connection: document.querySelector('#connection'), streamer: document.querySelector('#streamer'), status: document.querySelector('#stream-status'), game: document.querySelector('#game'), episode: document.querySelector('#episode'), command: document.querySelector('#typed-command'), message: document.querySelector('#message'), progress: document.querySelector('#progress-bar'), follower: document.querySelector('#last-follower'), subscriber: document.querySelector('#last-subscriber'), cheer: document.querySelector('#last-cheer'), raid: document.querySelector('#last-raid'), viewers: document.querySelector('#viewer-count'), uptime: document.querySelector('#stream-uptime'), questCadence: document.querySelector('#quest-cadence'), questName: document.querySelector('#quest-name'), questDescription: document.querySelector('#quest-description'), questProgress: document.querySelector('#quest-progress'), questCount: document.querySelector('#quest-count'), questReward: document.querySelector('#quest-reward'), weeklyQuest: document.querySelector('#weekly-quest'), completers: document.querySelector('#quest-completers'), userLog: document.querySelector('#user-log'), seasonName: document.querySelector('#season-name'), seasonDays: document.querySelector('#season-days'), seasonRanking: document.querySelector('#season-ranking'),
 };
-
-let currentState = {};
-
-function eventText(event, text) { return event?.username && event.username !== '—' ? text : 'WAITING FOR SIGNAL'; }
-
+const modules = Object.fromEntries([...document.querySelectorAll('[data-module]')].map(node => [node.dataset.module, node]));
+let currentState = {}, dashboard = null, activeModule = 'stream', rotationTimer = null;
+const eventText = (event, text) => event?.username && event.username !== '—' ? text : 'WAITING FOR SIGNAL';
 function render(state) {
-  currentState = state;
-  elements.streamer.textContent = state.streamer || '—';
-  elements.status.textContent = state.status || 'AFK';
-  elements.game.textContent = state.game || 'NO GAME SELECTED';
-  elements.episode.textContent = state.episode || '—';
-  elements.viewers.textContent = state.is_live ? String(state.viewer_count ?? 0) : '0';
-  elements.follower.textContent = eventText(state.last_follower, state.last_follower?.username);
-  elements.subscriber.textContent = eventText(state.last_subscriber, `${state.last_subscriber?.username || ''} · TIER ${state.last_subscriber?.tier || '—'}`);
-  elements.cheer.textContent = eventText(state.last_cheer, `${state.last_cheer?.username || ''} · ${state.last_cheer?.bits || 0} BITS`);
-  elements.raid.textContent = eventText(state.last_raid, `${state.last_raid?.username || ''} · ${state.last_raid?.viewers || 0} VIEWERS`);
-  renderUptime();
+  currentState = state; elements.streamer.textContent = state.streamer || '—'; elements.status.textContent = state.status || 'AFK'; elements.game.textContent = state.game || 'NO GAME SELECTED'; elements.episode.textContent = state.episode || '—'; elements.viewers.textContent = state.is_live ? String(state.viewer_count ?? 0) : '0';
+  elements.follower.textContent = eventText(state.last_follower, state.last_follower?.username); elements.subscriber.textContent = eventText(state.last_subscriber, `${state.last_subscriber?.username || ''} · TIER ${state.last_subscriber?.tier || '—'}`); elements.cheer.textContent = eventText(state.last_cheer, `${state.last_cheer?.username || ''} · ${state.last_cheer?.bits || 0} BITS`); elements.raid.textContent = eventText(state.last_raid, `${state.last_raid?.username || ''} · ${state.last_raid?.viewers || 0} VIEWERS`); renderUptime();
 }
-
-function renderUptime() {
-  if (!currentState.is_live || !currentState.stream_started_at) {
-    elements.uptime.textContent = 'OFFLINE';
-    return;
-  }
-  const elapsed = Math.max(0, Math.floor((Date.now() - new Date(currentState.stream_started_at).getTime()) / 1000));
-  const hours = Math.floor(elapsed / 3600);
-  const minutes = Math.floor((elapsed % 3600) / 60);
-  const seconds = elapsed % 60;
-  elements.uptime.textContent = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+function renderUptime() { if (!currentState.is_live || !currentState.stream_started_at) { elements.uptime.textContent = 'OFFLINE'; return; } const elapsed = Math.max(0, Math.floor((Date.now() - new Date(currentState.stream_started_at).getTime()) / 1000)); elements.uptime.textContent = `${String(Math.floor(elapsed / 3600)).padStart(2, '0')}:${String(Math.floor((elapsed % 3600) / 60)).padStart(2, '0')}:${String(elapsed % 60).padStart(2, '0')}`; }
+const time = value => new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+function addText(parent, tag, value, className = '') { const node = document.createElement(tag); if (className) node.className = className; node.textContent = value; parent.append(node); return node; }
+function renderQuest(quests) {
+  const primary = quests.find(item => item.cadence === 'daily') || quests[0]; if (!primary) return;
+  elements.questCadence.textContent = primary.cadence.toUpperCase(); elements.questName.textContent = primary.name; elements.questDescription.textContent = primary.description || 'COMPLETE THE ACTIVE OBJECTIVE.';
+  elements.questProgress.style.width = `${primary.participants ? Math.min(100, Math.round(primary.completions * 100 / primary.participants)) : 0}%`; elements.questCount.textContent = `${primary.completions} / ${primary.participants} USERS`; elements.questReward.textContent = `REWARD: ${primary.reward_xp} XP + ${primary.reward_credits} CREDITS`;
+  elements.completers.replaceChildren(); for (const [index, player] of primary.recent_completers.slice(0, 5).entries()) { const row = document.createElement('li'); addText(row, 'span', `${String(index + 1).padStart(2, '0')} ${player.display_name}`); addText(row, 'time', time(player.completed_at)); elements.completers.append(row); }
+  const weekly = quests.find(item => item.cadence === 'weekly' && item.id !== primary.id); elements.weeklyQuest.hidden = !weekly; if (weekly) elements.weeklyQuest.textContent = `WEEKLY // ${weekly.name} // ${weekly.completions}/${weekly.participants} USERS // +${weekly.reward_xp} XP +${weekly.reward_credits} C`;
 }
-
-function connect() {
-  const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
-  const socket = new WebSocket(`${protocol}://${location.host}/ws/overlay`);
-  socket.addEventListener('open', () => { elements.connection.textContent = 'LOCAL ONLINE'; });
-  socket.addEventListener('message', ({ data }) => { const message = JSON.parse(data); if (message.type === 'stream_state') render(message.data); });
-  socket.addEventListener('close', () => { elements.connection.textContent = 'RECONNECTING'; setTimeout(connect, 1500); });
-}
-
-const theme = document.querySelector('#brb-theme');
-theme.volume = 0.18;
-theme.play().catch(() => { elements.connection.title = 'El navegador bloqueó el autoplay; usa la pista como Media Source en OBS.'; });
-
-const messages = ['Searching for streamer...', 'WARNING: return time may vary.', 'ERROR: STREAMER NOT FOUND'];
-let run = 0;
-function loop() {
-  const command = '> execute return_stream.exe'; let character = 0; elements.command.textContent = '';
-  const typer = setInterval(() => { elements.command.textContent = command.slice(0, ++character); if (character === command.length) clearInterval(typer); }, 45);
-  let progress = 0; const loader = setInterval(() => { progress = Math.min(progress + 2, 100); elements.progress.style.width = `${progress}%`; if (progress === 100) { clearInterval(loader); elements.message.textContent = messages[run++ % messages.length]; setTimeout(loop, 3000); } }, 55);
-}
-
-connect(); loop(); setInterval(renderUptime, 1000);
+function renderUserLog(events) { elements.userLog.replaceChildren(); for (const event of events.slice(0, 6)) { const row = document.createElement('li'), header = document.createElement('div'); addText(header, 'time', time(event.occurred_at)); addText(header, 'b', event.display_name); addText(header, 'span', event.title); row.append(header); if (event.detail) addText(row, 'p', event.detail); elements.userLog.append(row); } }
+function renderSeason(season) { if (!season) return; elements.seasonName.textContent = season.name; elements.seasonDays.textContent = `${season.days_remaining} DAYS REMAINING`; elements.seasonRanking.replaceChildren(); for (const leader of season.leaders.slice(0, 5)) { const row = document.createElement('li'); addText(row, 'span', String(leader.rank).padStart(2, '0')); addText(row, 'b', leader.display_name); addText(row, 'span', String(leader.missions_completed)); addText(row, 'span', String(leader.season_xp)); elements.seasonRanking.append(row); } }
+function availableModules() { const values = ['stream']; if (dashboard?.quests?.length) values.push('quest'); if (dashboard?.user_log?.length) values.push('log'); if (dashboard?.season) values.push('season'); return values; }
+function showModule(name) { activeModule = name; for (const [key, module] of Object.entries(modules)) { const active = key === name; module.hidden = !active; module.classList.toggle('active', active); } clearTimeout(rotationTimer); const values = availableModules(); if (values.length > 1) rotationTimer = setTimeout(() => { const index = values.indexOf(activeModule); showModule(values[(index + 1) % values.length]); }, name === 'stream' ? 8000 : 10000); }
+function renderDashboard(data) { dashboard = data; renderQuest(data.quests || []); renderUserLog(data.user_log || []); renderSeason(data.season); const values = availableModules(); showModule(values.includes(activeModule) ? activeModule : 'stream'); }
+function prependPublicEvent(event) { if (!dashboard) dashboard = { quests: [], user_log: [], season: null }; dashboard.user_log = [event, ...(dashboard.user_log || []).filter(item => item.id !== event.id)].slice(0, 20); renderUserLog(dashboard.user_log); }
+async function loadDashboard() { try { const response = await fetch('/api/game/community-dashboard'); if (!response.ok) throw Error('dashboard unavailable'); renderDashboard(await response.json()); } catch (_) { dashboard = null; showModule('stream'); } }
+function connect() { const protocol = location.protocol === 'https:' ? 'wss' : 'ws', socket = new WebSocket(`${protocol}://${location.host}/ws/overlay`); socket.addEventListener('open', () => { elements.connection.textContent = 'LOCAL ONLINE'; }); socket.addEventListener('message', ({ data }) => { const message = JSON.parse(data); if (message.type === 'stream_state') render(message.data); if (message.type === 'game.community.event') prependPublicEvent(message.data); if (message.type === 'game.community.refresh' || message.type === 'game.community.snapshot') loadDashboard(); }); socket.addEventListener('close', () => { elements.connection.textContent = 'RECONNECTING'; setTimeout(connect, 1500); }); }
+const theme = document.querySelector('#brb-theme'); theme.volume = 0.18; theme.play().catch(() => { elements.connection.title = 'El navegador bloqueó el autoplay; usa la pista como Media Source en OBS.'; });
+const messages = ['Searching for streamer...', 'WARNING: return time may vary.', 'ERROR: STREAMER NOT FOUND']; let run = 0;
+function loop() { const command = '> execute return_stream.exe'; let character = 0; elements.command.textContent = ''; const typer = setInterval(() => { elements.command.textContent = command.slice(0, ++character); if (character === command.length) clearInterval(typer); }, 45); let progress = 0; const loader = setInterval(() => { progress = Math.min(progress + 2, 100); elements.progress.style.width = `${progress}%`; if (progress === 100) { clearInterval(loader); elements.message.textContent = messages[run++ % messages.length]; setTimeout(loop, 3000); } }, 55); }
+connect(); loadDashboard(); loop(); setInterval(renderUptime, 1000); setInterval(loadDashboard, 60000);

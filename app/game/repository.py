@@ -10,17 +10,30 @@ from sqlalchemy.exc import IntegrityError
 from app.game.models import (
     CategoryContent,
     ChatActor,
+    CommunityCompleter,
+    CommunityDashboard,
+    CommunityQuest,
+    CommunitySeason,
     EncounterState,
     ItemDefinition,
     ItemDefinitionInput,
     PlayerProfile,
     PlayerQuest,
+    PublicGameEvent,
     QuestCompletion,
     QuestDefinition,
     QuestDefinitionInput,
     QuestDefinitionUpdate,
+    Season,
+    SeasonInput,
+    SeasonLeader,
 )
 from app.game.service import CREDITS_PER_ACTION, XP_PER_ACTION, GAME_TIMEZONE, GameError, boss_intent, new_encounter, quest_period_key, resolve_round
+
+
+def _utc(value: datetime) -> datetime:
+    """MariaDB DATETIME is timezone-less; this project stores it as UTC."""
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
 
 class GameRepository:
@@ -138,6 +151,188 @@ class GameRepository:
             """), {"id": quest_id}).one()
         return QuestDefinition(**dict(row._mapping))
 
+    def seasons(self) -> list[Season]:
+        with self.engine.connect() as connection:
+            rows = connection.execute(text("""
+                SELECT id, name, slug, starts_at, ends_at, active
+                FROM game_seasons ORDER BY starts_at DESC, id DESC
+            """)).all()
+        return [Season(**{**dict(row._mapping), "starts_at": _utc(row.starts_at), "ends_at": _utc(row.ends_at)}) for row in rows]
+
+    def create_season(self, season: SeasonInput) -> Season:
+        self._validate_season_dates(season)
+        with self.engine.begin() as connection:
+            self._assert_no_active_season_overlap(connection, season)
+            result = connection.execute(text("""
+                INSERT INTO game_seasons (name, slug, starts_at, ends_at, active)
+                VALUES (:name, :slug, :starts_at, :ends_at, :active)
+            """), season.model_dump())
+            row = connection.execute(text("""
+                SELECT id, name, slug, starts_at, ends_at, active
+                FROM game_seasons WHERE id = :id
+            """), {"id": result.lastrowid}).one()
+        return Season(**{**dict(row._mapping), "starts_at": _utc(row.starts_at), "ends_at": _utc(row.ends_at)})
+
+    def update_season(self, season_id: int, season: SeasonInput) -> Season:
+        self._validate_season_dates(season)
+        with self.engine.begin() as connection:
+            self._assert_no_active_season_overlap(connection, season, season_id)
+            result = connection.execute(text("""
+                UPDATE game_seasons
+                SET name=:name, slug=:slug, starts_at=:starts_at, ends_at=:ends_at, active=:active
+                WHERE id=:id
+            """), {**season.model_dump(), "id": season_id})
+            if not result.rowcount:
+                raise GameError("La temporada ya no existe.")
+            row = connection.execute(text("""
+                SELECT id, name, slug, starts_at, ends_at, active
+                FROM game_seasons WHERE id = :id
+            """), {"id": season_id}).one()
+        return Season(**{**dict(row._mapping), "starts_at": _utc(row.starts_at), "ends_at": _utc(row.ends_at)})
+
+    @staticmethod
+    def _validate_season_dates(season: SeasonInput) -> None:
+        if season.ends_at <= season.starts_at:
+            raise GameError("El cierre de la temporada debe ser posterior a su inicio.")
+
+    @staticmethod
+    def _assert_no_active_season_overlap(connection: Any, season: SeasonInput, excluded_id: int | None = None) -> None:
+        if not season.active:
+            return
+        row = connection.execute(text("""
+            SELECT id FROM game_seasons
+            WHERE active = TRUE AND starts_at <= :ends_at AND ends_at >= :starts_at
+              AND (:excluded_id IS NULL OR id <> :excluded_id)
+            LIMIT 1 FOR UPDATE
+        """), {"starts_at": season.starts_at, "ends_at": season.ends_at, "excluded_id": excluded_id}).first()
+        if row:
+            raise GameError("Ya existe otra temporada activa en ese rango de fechas.")
+
+    def recent_public_events(self, limit: int = 20) -> list[PublicGameEvent]:
+        safe_limit = max(1, min(int(limit), 20))
+        with self.engine.connect() as connection:
+            rows = connection.execute(text("""
+                SELECT e.id, e.event_type, COALESCE(u.display_name, 'SYSTEM') AS display_name,
+                       e.title, e.detail, e.occurred_at
+                FROM game_public_events e
+                LEFT JOIN twitch_users u ON u.twitch_user_id = e.twitch_user_id
+                ORDER BY e.occurred_at DESC, e.id DESC
+                LIMIT :limit
+            """), {"limit": safe_limit}).all()
+        return [PublicGameEvent(**{**dict(row._mapping), "occurred_at": _utc(row.occurred_at)}) for row in rows]
+
+    def active_public_quests(self, category_id: str = "", now: datetime | None = None) -> list[CommunityQuest]:
+        now = now or datetime.now(timezone.utc)
+        daily_key = quest_period_key("daily", now)
+        weekly_key = quest_period_key("weekly", now)
+        with self.engine.connect() as connection:
+            rows = connection.execute(text("""
+                SELECT id, cadence, name, description, objective_type, objective_target,
+                       reward_xp, reward_credits
+                FROM game_quest_definitions
+                WHERE enabled = TRUE
+                  AND (twitch_category_id IS NULL OR twitch_category_id = NULLIF(:category_id, ''))
+                  AND cadence IN ('daily', 'weekly')
+                ORDER BY FIELD(cadence, 'daily', 'weekly'), id ASC
+            """), {"category_id": category_id}).all()
+            selected: dict[str, dict[str, Any]] = {}
+            for row in rows:
+                quest = dict(row._mapping)
+                selected.setdefault(quest["cadence"], quest)
+            quests: list[CommunityQuest] = []
+            for cadence in ("daily", "weekly"):
+                quest = selected.get(cadence)
+                if not quest:
+                    continue
+                period_key = daily_key if cadence == "daily" else weekly_key
+                totals = connection.execute(text("""
+                    SELECT COUNT(*) AS participants,
+                           COALESCE(SUM(completed_at IS NOT NULL), 0) AS completions
+                    FROM game_player_quest_progress
+                    WHERE quest_definition_id = :quest_id AND period_key = :period_key
+                """), {"quest_id": quest["id"], "period_key": period_key}).one()
+                completers = connection.execute(text("""
+                    SELECT u.display_name, p.completed_at
+                    FROM game_player_quest_progress p
+                    JOIN twitch_users u ON u.twitch_user_id = p.twitch_user_id
+                    WHERE p.quest_definition_id = :quest_id AND p.period_key = :period_key
+                      AND p.completed_at IS NOT NULL
+                    ORDER BY p.completed_at DESC, u.display_name ASC
+                    LIMIT 5
+                """), {"quest_id": quest["id"], "period_key": period_key}).all()
+                quests.append(CommunityQuest(
+                    **quest,
+                    period_key=period_key,
+                    participants=int(totals.participants),
+                    completions=int(totals.completions),
+                    recent_completers=[CommunityCompleter(**{**dict(item._mapping), "completed_at": _utc(item.completed_at)}) for item in completers],
+                ))
+        return quests
+
+    def active_season_leaders(self, limit: int = 5, now: datetime | None = None) -> CommunitySeason | None:
+        safe_limit = max(1, min(int(limit), 5))
+        now = now or datetime.now(timezone.utc)
+        with self.engine.connect() as connection:
+            season_row = connection.execute(text("""
+                SELECT id, name, starts_at, ends_at
+                FROM game_seasons
+                WHERE active = TRUE AND starts_at <= :now AND ends_at >= :now
+                ORDER BY starts_at DESC, id DESC LIMIT 1
+            """), {"now": now}).first()
+            if not season_row:
+                return None
+            season = dict(season_row._mapping)
+            rows = connection.execute(text("""
+                SELECT u.display_name,
+                       (SELECT COUNT(*) FROM game_player_quest_progress p
+                        WHERE p.twitch_user_id = gp.twitch_user_id
+                          AND p.completed_at >= :starts_at AND p.completed_at <= :ends_at) AS missions_completed,
+                       (SELECT COALESCE(SUM(r.xp), 0) FROM game_rewards r
+                        WHERE r.twitch_user_id = gp.twitch_user_id
+                          AND r.created_at >= :starts_at AND r.created_at <= :ends_at) AS season_xp,
+                       (SELECT MAX(p.completed_at) FROM game_player_quest_progress p
+                        WHERE p.twitch_user_id = gp.twitch_user_id
+                          AND p.completed_at >= :starts_at AND p.completed_at <= :ends_at) AS last_completed_at
+                FROM game_players gp
+                JOIN twitch_users u ON u.twitch_user_id = gp.twitch_user_id
+                HAVING missions_completed > 0 OR season_xp > 0
+                ORDER BY missions_completed DESC, season_xp DESC, last_completed_at DESC, u.display_name ASC
+                LIMIT :limit
+            """), {"starts_at": season["starts_at"], "ends_at": season["ends_at"], "limit": safe_limit}).all()
+        leaders = [SeasonLeader(rank=index, display_name=row.display_name, missions_completed=int(row.missions_completed), season_xp=int(row.season_xp)) for index, row in enumerate(rows, start=1)]
+        starts_at, ends_at = _utc(season["starts_at"]), _utc(season["ends_at"])
+        days_remaining = max(0, (ends_at.date() - now.astimezone(timezone.utc).date()).days)
+        return CommunitySeason(name=season["name"], starts_at=starts_at, ends_at=ends_at, days_remaining=days_remaining, leaders=leaders)
+
+    def community_dashboard(self, category_id: str = "", now: datetime | None = None) -> CommunityDashboard:
+        now = now or datetime.now(timezone.utc)
+        return CommunityDashboard(
+            generated_at=now,
+            quests=self.active_public_quests(category_id, now),
+            user_log=self.recent_public_events(20),
+            season=self.active_season_leaders(5, now),
+        )
+
+    def _record_public_event(self, connection: Any, user_id: str | None, event_type: str, title: str, detail: str, source_key: str, now: datetime) -> PublicGameEvent | None:
+        result = connection.execute(text("""
+            INSERT IGNORE INTO game_public_events
+              (twitch_user_id, event_type, title, detail, source_key, occurred_at)
+            VALUES (:user_id, :event_type, :title, :detail, :source_key, :now)
+        """), {
+            "user_id": user_id, "event_type": event_type[:40], "title": title[:120],
+            "detail": detail[:255], "source_key": source_key[:128], "now": now,
+        })
+        if not result.rowcount:
+            return None
+        row = connection.execute(text("""
+            SELECT e.id, e.event_type, COALESCE(u.display_name, 'SYSTEM') AS display_name,
+                   e.title, e.detail, e.occurred_at
+            FROM game_public_events e
+            LEFT JOIN twitch_users u ON u.twitch_user_id = e.twitch_user_id
+            WHERE e.id = :id
+        """), {"id": result.lastrowid}).one()
+        return PublicGameEvent(**{**dict(row._mapping), "occurred_at": _utc(row.occurred_at)})
+
     def _upsert_actor(self, connection: Any, actor: ChatActor, now: datetime) -> None:
         connection.execute(text("""
             INSERT INTO twitch_users (twitch_user_id, login, display_name, first_seen_at, last_seen_at)
@@ -145,7 +340,7 @@ class GameRepository:
             ON DUPLICATE KEY UPDATE login = VALUES(login), display_name = VALUES(display_name), last_seen_at = VALUES(last_seen_at)
         """), {"id": actor.user_id, "login": actor.login, "name": actor.display_name, "now": now})
 
-    def register_player(self, actor: ChatActor) -> tuple[PlayerProfile, bool]:
+    def register_player(self, actor: ChatActor) -> tuple[PlayerProfile, bool, PublicGameEvent | None]:
         now = datetime.now(timezone.utc)
         with self.engine.begin() as connection:
             self._upsert_actor(connection, actor, now)
@@ -156,7 +351,11 @@ class GameRepository:
                 SELECT p.twitch_user_id AS user_id, u.display_name, p.level, p.xp, p.credits
                 FROM game_players p JOIN twitch_users u ON u.twitch_user_id = p.twitch_user_id WHERE p.twitch_user_id = :id
             """), {"id": actor.user_id}).one()
-        return PlayerProfile(**dict(row._mapping)), inserted
+            public_event = self._record_public_event(
+                connection, actor.user_id, "player_joined", "NEW PLAYER INITIALIZED", "",
+                f"player-joined:{actor.user_id}", now,
+            ) if inserted else None
+        return PlayerProfile(**dict(row._mapping)), inserted, public_event
 
     def player(self, user_id: str) -> PlayerProfile | None:
         with self.engine.connect() as connection:
@@ -231,6 +430,11 @@ class GameRepository:
               AND (twitch_category_id IS NULL OR twitch_category_id = NULLIF(:category_id, ''))
         """), {"objective_type": objective_type, "category_id": category_id}).all()
         completions: list[QuestCompletion] = []
+        player = connection.execute(text("""
+            SELECT xp, level FROM game_players WHERE twitch_user_id = :user_id FOR UPDATE
+        """), {"user_id": user_id}).one()
+        current_xp = int(player.xp)
+        current_level = int(player.level)
         for row in quests:
             quest = dict(row._mapping)
             period_key = quest_period_key(quest["cadence"], now)
@@ -265,12 +469,14 @@ class GameRepository:
             """), {"user_id": user_id, "source_id": source_id, "xp": quest["reward_xp"], "credits": quest["reward_credits"]})
             if not reward.rowcount:
                 continue
+            level_before = current_level
+            current_xp += int(quest["reward_xp"])
+            current_level = 1 + current_xp // 100
             connection.execute(text("""
                 UPDATE game_players
-                SET xp = xp + :xp, credits = credits + :credits,
-                    level = 1 + FLOOR((xp + :xp) / 100)
+                SET xp = :xp, credits = credits + :credits, level = :level
                 WHERE twitch_user_id = :user_id
-            """), {"xp": quest["reward_xp"], "credits": quest["reward_credits"], "user_id": user_id})
+            """), {"xp": current_xp, "credits": quest["reward_credits"], "level": current_level, "user_id": user_id})
             item_name = ""
             if quest["reward_random_item"]:
                 item = self._random_item(connection, category_id)
@@ -284,7 +490,28 @@ class GameRepository:
                         WHERE twitch_user_id = :user_id AND quest_definition_id = :quest_id AND period_key = :period_key
                     """), {"item_id": item["id"], "user_id": user_id, "quest_id": quest["id"], "period_key": period_key})
                     item_name = item["name"]
-            completions.append(QuestCompletion(name=quest["name"], xp=quest["reward_xp"], credits=quest["reward_credits"], item_name=item_name))
+            detail = f"{quest['name']} // +{quest['reward_xp']} XP +{quest['reward_credits']} C"
+            if item_name:
+                detail += f" // {item_name}"
+            public_events = []
+            completion_event = self._record_public_event(
+                connection, user_id, "quest_completed", "MISSION COMPLETE", detail,
+                f"quest-completed:{user_id}:{quest['id']}:{period_key}", now,
+            )
+            if completion_event:
+                public_events.append(completion_event)
+            if current_level > level_before:
+                level_event = self._record_public_event(
+                    connection, user_id, "level_up", "LEVEL INCREASED", f"LV {current_level:02d}",
+                    f"level-up:{user_id}:{quest['id']}:{period_key}", now,
+                )
+                if level_event:
+                    public_events.append(level_event)
+            completions.append(QuestCompletion(
+                quest_id=int(quest["id"]), period_key=period_key, name=quest["name"],
+                xp=int(quest["reward_xp"]), credits=int(quest["reward_credits"]), item_name=item_name,
+                level_before=level_before, level_after=current_level, public_events=public_events,
+            ))
         return completions
 
     @staticmethod

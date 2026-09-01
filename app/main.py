@@ -20,12 +20,15 @@ from app.game.controller import GameController
 from app.game.models import (
     BossDefinitionInput,
     CategoryContent,
+    CommunityDashboard,
     EncounterState,
     ItemDefinition,
     ItemDefinitionInput,
     QuestDefinition,
     QuestDefinitionInput,
     QuestDefinitionUpdate,
+    Season,
+    SeasonInput,
 )
 from app.game.repository import GameRepository
 from app.game.service import GameError
@@ -360,6 +363,37 @@ async def game_encounter(request: Request) -> EncounterState | None:
     return await asyncio.to_thread(game_repository_or_503(request).active_encounter)
 
 
+@app.get("/api/game/community-dashboard", response_model=CommunityDashboard)
+async def game_community_dashboard(request: Request) -> CommunityDashboard:
+    """Public, bounded BRB data. It deliberately exposes no technical IDs."""
+    state = await request.app.state.stream_state.get()
+    return await asyncio.to_thread(game_repository_or_503(request).community_dashboard, state.category_id)
+
+
+@app.get("/api/game/seasons", response_model=list[Season])
+async def game_seasons(request: Request) -> list[Season]:
+    require_admin_token(request)
+    return await asyncio.to_thread(game_repository_or_503(request).seasons)
+
+
+@app.post("/api/game/seasons", response_model=Season)
+async def create_game_season(payload: SeasonInput, request: Request) -> Season:
+    require_admin_token(request)
+    try:
+        return await asyncio.to_thread(game_repository_or_503(request).create_season, payload)
+    except GameError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.put("/api/game/seasons/{season_id}", response_model=Season)
+async def update_game_season(season_id: int, payload: SeasonInput, request: Request) -> Season:
+    require_admin_token(request)
+    try:
+        return await asyncio.to_thread(game_repository_or_503(request).update_season, season_id, payload)
+    except GameError as error:
+        raise HTTPException(status_code=404 if "no existe" in str(error) else 422, detail=str(error)) from error
+
+
 @app.get("/api/game/categories", response_model=list[CategoryContent])
 async def game_categories(request: Request) -> list[CategoryContent]:
     require_admin_token(request)
@@ -524,6 +558,13 @@ async def overlay_socket(websocket: WebSocket) -> None:
         await websocket.send_json({"type": "stream_state", "data": state.model_dump(mode="json")})
         team = await asyncio.to_thread(websocket.app.state.pokemon_team.get_team)
         await websocket.send_json({"type": "pokemon_team", "data": team.model_dump(mode="json")})
+        if websocket.app.state.game_repository:
+            try:
+                # The client fetches the bounded public snapshot; do not push a
+                # ranking for every connection or any internal game data.
+                await websocket.send_json({"type": "game.community.snapshot", "data": {}})
+            except Exception:
+                logger.exception("Could not initialize the community dashboard socket message")
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:

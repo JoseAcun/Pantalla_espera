@@ -3,34 +3,58 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>BRB Overlay</title>
+    <title>STREAM_OS BRB</title>
     <link rel="stylesheet" href="/static/brb/styles.css" />
   </head>
   <body>
-    <main class="terminal" aria-label="Pantalla vuelvo pronto">
-      <header><span>STREAM_OS v0.1</span><span id="connection">CONNECTING</span></header>
-      <section class="content">
-        <p class="command">&gt; status</p>
-        <dl>
-          <div><dt>STREAMER</dt><dd id="streamer">—</dd></div>
-          <div><dt>STREAM</dt><dd id="stream-status">AFK</dd></div>
-          <div><dt>GAME</dt><dd id="game">—</dd></div>
-          <div><dt>EPISODE</dt><dd id="episode">—</dd></div>
-          <div><dt>VIEWERS</dt><dd id="viewer-count">0</dd></div>
-          <div><dt>UPTIME</dt><dd id="stream-uptime">OFFLINE</dd></div>
-        </dl>
-        <section class="events" aria-label="Últimos eventos del canal">
-          <p class="section-label">&gt; recent_channel_events</p>
-          <dl>
-            <div><dt>LAST FOLLOW</dt><dd id="last-follower">WAITING FOR SIGNAL</dd></div>
-            <div><dt>LAST SUB</dt><dd id="last-subscriber">WAITING FOR SIGNAL</dd></div>
-            <div><dt>LAST CHEER</dt><dd id="last-cheer">WAITING FOR SIGNAL</dd></div>
-            <div><dt>LAST RAID</dt><dd id="last-raid">WAITING FOR SIGNAL</dd></div>
+    <main class="terminal" aria-label="Pantalla comunitaria vuelvo pronto">
+      <header><span>STREAM_OS v0.2</span><span id="connection">CONNECTING</span></header>
+      <section class="content" id="module-stack">
+        <section class="module active" data-module="stream">
+          <p class="command">&gt; status</p>
+          <dl class="status-grid">
+            <div><dt>STREAMER</dt><dd id="streamer">—</dd></div>
+            <div><dt>STREAM</dt><dd id="stream-status">AFK</dd></div>
+            <div><dt>GAME</dt><dd id="game">—</dd></div>
+            <div><dt>EPISODE</dt><dd id="episode">—</dd></div>
+            <div><dt>VIEWERS</dt><dd id="viewer-count">0</dd></div>
+            <div><dt>UPTIME</dt><dd id="stream-uptime">OFFLINE</dd></div>
           </dl>
+          <section class="events" aria-label="Últimos eventos del canal">
+            <p class="section-label">&gt; recent_channel_events</p>
+            <dl>
+              <div><dt>LAST FOLLOW</dt><dd id="last-follower">WAITING FOR SIGNAL</dd></div>
+              <div><dt>LAST SUB</dt><dd id="last-subscriber">WAITING FOR SIGNAL</dd></div>
+              <div><dt>LAST CHEER</dt><dd id="last-cheer">WAITING FOR SIGNAL</dd></div>
+              <div><dt>LAST RAID</dt><dd id="last-raid">WAITING FOR SIGNAL</dd></div>
+            </dl>
+          </section>
+          <p class="command" id="typed-command"></p>
+          <p class="message" id="message">Searching for streamer...</p>
+          <div class="progress" aria-label="Progreso"><div id="progress-bar"></div></div>
         </section>
-        <p class="command" id="typed-command"></p>
-        <p class="message" id="message">Searching for streamer...</p>
-        <div class="progress" aria-label="Progreso"><div id="progress-bar"></div></div>
+        <section class="module" data-module="quest" hidden>
+          <p class="command">&gt; mount module://quest_tracker</p>
+          <div class="module-heading"><h1>ACTIVE QUEST</h1><span id="quest-cadence">DAILY</span></div>
+          <h2 id="quest-name">WAITING FOR MISSION</h2>
+          <p id="quest-description">—</p>
+          <div class="meter"><div id="quest-progress"></div></div>
+          <p id="quest-count" class="reward">0 / 0 USERS</p>
+          <p id="quest-reward" class="reward">REWARD: 0 XP + 0 CREDITS</p>
+          <div id="weekly-quest" class="secondary-quest" hidden></div>
+          <section class="completion-list"><p class="section-label">RECENT COMPLETIONS</p><ol id="quest-completers"></ol></section>
+        </section>
+        <section class="module" data-module="log" hidden>
+          <p class="command">&gt; open USER_LOG --tail=6</p>
+          <div class="module-heading"><h1>USER_LOG</h1><span>PUBLIC SIGNALS</span></div>
+          <ol id="user-log" class="user-log"></ol>
+        </section>
+        <section class="module" data-module="season" hidden>
+          <p class="command">&gt; calculate season_ranking</p>
+          <div class="module-heading"><h1 id="season-name">SEASON</h1><span id="season-days">0 DAYS REMAINING</span></div>
+          <div class="ranking-head"><span>RANK</span><span>PLAYER</span><span>MISSIONS</span><span>XP</span></div>
+          <ol id="season-ranking" class="ranking"></ol>
+        </section>
         <p class="prompt">&gt; <span class="cursor">_</span></p>
       </section>
     </main>
