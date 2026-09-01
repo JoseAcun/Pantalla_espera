@@ -160,7 +160,7 @@ class EventRepository:
                 INSERT INTO stream_sessions (twitch_stream_id, broadcaster_id, started_at, game_name, title)
                 VALUES (:stream_id, :broadcaster_id, :started_at, :game_name, :title)
                 ON DUPLICATE KEY UPDATE broadcaster_id = VALUES(broadcaster_id),
-                    game_name = VALUES(game_name), title = VALUES(title)
+                    game_name = VALUES(game_name), title = VALUES(title), ended_at = NULL
             """), {
                 "stream_id": state.twitch_stream_id, "broadcaster_id": state.broadcaster_id,
                 "started_at": started_at, "game_name": state.category or state.game or "", "title": state.title or "",

@@ -18,6 +18,10 @@ class FakeAnalyticsRepository:
         if not session:
             session = {"id": len(self.sessions) + 1, "ended_at": None}
             self.sessions[state.twitch_stream_id] = session
+        else:
+            # Mirror the database upsert: a confirmed live response reopens
+            # this Twitch stream ID after a transient false-offline response.
+            session["ended_at"] = None
         return StreamSession(id=session["id"], twitch_stream_id=state.twitch_stream_id)
 
     def close_open_sessions_for_broadcaster(self, broadcaster_id, ended_at):
@@ -77,6 +81,17 @@ class StreamAnalyticsTests(unittest.TestCase):
         self.observe(StreamState(broadcaster_id="broadcaster-1", is_live=False), 60)
         self.assertEqual(self.repository.sessions["stream-1"]["ended_at"], self.now + timedelta(seconds=60))
         self.assertEqual(len(self.repository.snapshots), 1)
+
+    def test_false_offline_then_same_live_stream_reopens_and_samples_same_session(self) -> None:
+        self.observe(live_state())
+        self.observe(StreamState(broadcaster_id="broadcaster-1", is_live=False), 60)
+        self.observe(live_state(), 300)
+
+        session = self.repository.sessions["stream-1"]
+        self.assertEqual(session["id"], 1)
+        self.assertIsNone(session["ended_at"])
+        self.assertEqual(self.repository.snapshots[-1], (1, 14, self.now + timedelta(seconds=300)))
+        self.assertEqual(len(self.repository.snapshots), 2)
 
     def test_snapshot_interval_is_durable(self) -> None:
         self.observe(live_state())
