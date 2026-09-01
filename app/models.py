@@ -34,12 +34,14 @@ class RaidEvent(BaseModel):
 
 
 class StreamState(BaseModel):
+    twitch_stream_id: str = ""
     broadcaster_id: str = ""
     broadcaster_login: str = ""
     streamer: str = "STREAMER"
     game: str = "NO GAME SELECTED"
     category: str = ""
     category_id: str = ""
+    title: str = ""
     status: str = "AFK"
     episode: str = ""
     custom_message: str = ""

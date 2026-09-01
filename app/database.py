@@ -4,10 +4,11 @@ import hashlib
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, Boolean, Column, DateTime, ForeignKey, Integer, MetaData, String, Table, Text, create_engine, desc, select
+from sqlalchemy import JSON, BigInteger, Boolean, Column, DateTime, ForeignKey, Integer, MetaData, String, Table, Text, create_engine, desc, select, text
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.exc import IntegrityError
 
+from app.analytics import StreamSession
 from app.models import StreamState
 
 
@@ -139,6 +140,100 @@ class EventRepository:
             "tier": tier, "is_gift": False, "source": "manual",
         }
         return self.save(message_id, "channel.subscribe", payload, occurred_at)
+
+    def get_or_create_stream_session(self, state: StreamState, observed_at: datetime) -> StreamSession:
+        """Use Twitch's immutable live-stream ID as the durable session key."""
+        if not (state.twitch_stream_id and state.broadcaster_id):
+            raise ValueError("Una sesión requiere twitch_stream_id y broadcaster_id.")
+        started_at = _as_datetime(state.stream_started_at, observed_at)
+        with self.engine.begin() as connection:
+            self._upsert_user(connection, state.broadcaster_id, state.broadcaster_login, state.streamer, observed_at)
+            # Twitch allows one active stream per broadcaster. If the process
+            # missed an offline poll, close the stale prior session before
+            # accepting a new live-stream ID.
+            connection.execute(text("""
+                UPDATE stream_sessions SET ended_at = :observed_at
+                WHERE broadcaster_id = :broadcaster_id AND twitch_stream_id <> :stream_id
+                  AND ended_at IS NULL
+            """), {"broadcaster_id": state.broadcaster_id, "stream_id": state.twitch_stream_id, "observed_at": observed_at})
+            connection.execute(text("""
+                INSERT INTO stream_sessions (twitch_stream_id, broadcaster_id, started_at, game_name, title)
+                VALUES (:stream_id, :broadcaster_id, :started_at, :game_name, :title)
+                ON DUPLICATE KEY UPDATE broadcaster_id = VALUES(broadcaster_id),
+                    game_name = VALUES(game_name), title = VALUES(title)
+            """), {
+                "stream_id": state.twitch_stream_id, "broadcaster_id": state.broadcaster_id,
+                "started_at": started_at, "game_name": state.category or state.game or "", "title": state.title or "",
+            })
+            row = connection.execute(text("""
+                SELECT id, twitch_stream_id FROM stream_sessions WHERE twitch_stream_id = :stream_id
+            """), {"stream_id": state.twitch_stream_id}).one()
+        return StreamSession(id=int(row.id), twitch_stream_id=row.twitch_stream_id)
+
+    def open_stream_session(self, twitch_stream_id: str) -> StreamSession | None:
+        with self.engine.connect() as connection:
+            row = connection.execute(text("""
+                SELECT id, twitch_stream_id FROM stream_sessions
+                WHERE twitch_stream_id = :stream_id AND ended_at IS NULL
+            """), {"stream_id": twitch_stream_id}).first()
+        return StreamSession(id=int(row.id), twitch_stream_id=row.twitch_stream_id) if row else None
+
+    def close_stream_session(self, twitch_stream_id: str, ended_at: datetime) -> bool:
+        with self.engine.begin() as connection:
+            result = connection.execute(text("""
+                UPDATE stream_sessions SET ended_at = :ended_at
+                WHERE twitch_stream_id = :stream_id AND ended_at IS NULL
+            """), {"stream_id": twitch_stream_id, "ended_at": ended_at})
+        return result.rowcount > 0
+
+    def close_open_sessions_for_broadcaster(self, broadcaster_id: str, ended_at: datetime) -> int:
+        """Close any open session after Helix confirms the channel is offline."""
+        with self.engine.begin() as connection:
+            result = connection.execute(text("""
+                UPDATE stream_sessions SET ended_at = :ended_at
+                WHERE broadcaster_id = :broadcaster_id AND ended_at IS NULL
+            """), {"broadcaster_id": broadcaster_id, "ended_at": ended_at})
+        return int(result.rowcount)
+
+    def last_viewer_snapshot_at(self, stream_session_id: int) -> datetime | None:
+        with self.engine.connect() as connection:
+            captured_at = connection.execute(text("""
+                SELECT MAX(captured_at) FROM viewer_snapshots WHERE stream_session_id = :session_id
+            """), {"session_id": stream_session_id}).scalar_one()
+        if captured_at is None:
+            return None
+        # MariaDB DATETIME deliberately has no timezone; the schema contract is UTC.
+        return captured_at.replace(tzinfo=timezone.utc) if captured_at.tzinfo is None else captured_at.astimezone(timezone.utc)
+
+    def record_viewer_snapshot(self, stream_session_id: int, viewer_count: int, captured_at: datetime) -> None:
+        with self.engine.begin() as connection:
+            connection.execute(text("""
+                INSERT INTO viewer_snapshots (stream_session_id, viewer_count, captured_at)
+                VALUES (:session_id, :viewer_count, :captured_at)
+            """), {"session_id": stream_session_id, "viewer_count": max(0, viewer_count), "captured_at": captured_at})
+
+    def record_session_category(self, stream_session_id: int, category_id: str, category_name: str, observed_at: datetime, source: str) -> bool:
+        """Store only actual category transitions within this specific live session."""
+        if not category_id:
+            return False
+        with self.engine.begin() as connection:
+            connection.execute(text("""
+                INSERT INTO stream_categories (twitch_category_id, name, first_seen_at, last_seen_at)
+                VALUES (:category_id, :name, :observed_at, :observed_at)
+                ON DUPLICATE KEY UPDATE name = VALUES(name), last_seen_at = VALUES(last_seen_at)
+            """), {"category_id": category_id, "name": category_name or "Uncategorized", "observed_at": observed_at})
+            previous = connection.execute(text("""
+                SELECT twitch_category_id FROM stream_category_history
+                WHERE stream_session_id = :session_id
+                ORDER BY observed_at DESC, id DESC LIMIT 1
+            """), {"session_id": stream_session_id}).scalar_one_or_none()
+            if previous == category_id:
+                return False
+            connection.execute(text("""
+                INSERT INTO stream_category_history (stream_session_id, twitch_category_id, observed_at, source)
+                VALUES (:session_id, :category_id, :observed_at, :source)
+            """), {"session_id": stream_session_id, "category_id": category_id, "observed_at": observed_at, "source": source})
+        return True
 
     def _upsert_user(self, connection: Any, user_id: str, login: str, display_name: str, observed_at: datetime) -> None:
         if not user_id:

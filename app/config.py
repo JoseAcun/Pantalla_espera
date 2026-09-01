@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,6 +22,7 @@ class Settings(BaseSettings):
     overlay_status: str = "AFK"
     overlay_episode: str = ""
     overlay_custom_message: str = ""
+    viewer_snapshot_interval_seconds: int = Field(default=300, ge=1)
 
 
 @lru_cache

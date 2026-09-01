@@ -4,6 +4,7 @@ import logging
 import secrets
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -11,6 +12,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from app.analytics import persist_stream_observation
 from app.config import get_settings
 from app.eventsub import EventSubClient
 from app.database import EventRepository
@@ -62,6 +64,7 @@ async def refresh_metrics_periodically(app: FastAPI) -> None:
             current = await app.state.stream_state.get()
             refreshed = await app.state.twitch.refresh_live_metrics(current)
             await app.state.stream_state.replace(refreshed)
+            await persist_stream_analytics(app, refreshed)
             await record_stream_category(app, refreshed, "poll")
             await app.state.connections.broadcast({"type": "stream_state", "data": refreshed.model_dump(mode="json")})
         except Exception as error:
@@ -86,6 +89,23 @@ async def persist_hydrated_follower(app: FastAPI, state: StreamState) -> None:
             await asyncio.to_thread(app.state.repository.record_hydrated_follower, state)
         except Exception:
             logger.exception("Could not persist the follower recovered from Helix")
+
+
+async def persist_stream_analytics(app: FastAPI, state: StreamState) -> None:
+    """Persist the Helix-derived live state without ever blocking the overlay."""
+    repository: EventRepository | None = app.state.repository
+    if not repository:
+        return
+    try:
+        await asyncio.to_thread(
+            persist_stream_observation,
+            repository,
+            state,
+            datetime.now(timezone.utc),
+            get_settings().viewer_snapshot_interval_seconds,
+        )
+    except Exception:
+        logger.exception("Could not persist stream session analytics")
 
 
 async def record_stream_category(app: FastAPI, state: StreamState, source: str) -> None:
@@ -139,6 +159,7 @@ async def lifespan(app: FastAPI):
             hydrated = await app.state.twitch.hydrate_state()
             await app.state.stream_state.replace(hydrated)
             await persist_hydrated_follower(app, hydrated)
+            await persist_stream_analytics(app, hydrated)
             await record_stream_category(app, hydrated, "startup")
             app.state.eventsub.start()
         except Exception as error:
@@ -218,6 +239,7 @@ async def twitch_auth_poll(request: Request) -> dict[str, object]:
         stream_state = await request.app.state.twitch.hydrate_state()
         await request.app.state.stream_state.replace(stream_state)
         await persist_hydrated_follower(request.app, stream_state)
+        await persist_stream_analytics(request.app, stream_state)
         await record_stream_category(request.app, stream_state, "oauth")
         await request.app.state.eventsub.restore_from_repository()
         await request.app.state.connections.broadcast({"type": "stream_state", "data": stream_state.model_dump(mode="json")})
@@ -244,6 +266,7 @@ async def twitch_auth_callback(request: Request, code: str | None = None, state:
         stream_state = await request.app.state.twitch.hydrate_state()
         await request.app.state.stream_state.replace(stream_state)
         await persist_hydrated_follower(request.app, stream_state)
+        await persist_stream_analytics(request.app, stream_state)
         await record_stream_category(request.app, stream_state, "oauth")
         await request.app.state.connections.broadcast({"type": "stream_state", "data": stream_state.model_dump(mode="json")})
         request.app.state.eventsub.start()
@@ -319,6 +342,7 @@ async def twitch_sync(request: Request) -> StreamState:
         raise HTTPException(status_code=502, detail=str(error)) from error
     await request.app.state.stream_state.replace(state)
     await persist_hydrated_follower(request.app, state)
+    await persist_stream_analytics(request.app, state)
     await record_stream_category(request.app, state, "sync")
     await request.app.state.connections.broadcast({"type": "stream_state", "data": state.model_dump(mode="json")})
     return state

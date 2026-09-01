@@ -42,10 +42,6 @@ class GameRepository:
                 VALUES (:id, :name, :now, :now)
                 ON DUPLICATE KEY UPDATE name = VALUES(name), last_seen_at = VALUES(last_seen_at)
             """), {"id": category_id, "name": name or "Uncategorized", "now": now})
-            connection.execute(text("""
-                INSERT INTO stream_category_history (twitch_category_id, observed_at, source)
-                VALUES (:id, :now, :source)
-            """), {"id": category_id, "now": now, "source": source})
 
     def categories(self) -> list[CategoryContent]:
         with self.engine.connect() as connection:

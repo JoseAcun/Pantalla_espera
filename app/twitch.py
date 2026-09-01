@@ -150,12 +150,14 @@ class TwitchClient:
         stream = streams[0] if streams else {}
         follower = followers[0] if followers else {}
         return StreamState(
+            twitch_stream_id=stream.get("id", ""),
             broadcaster_id=broadcaster_id,
             broadcaster_login=user.get("login", ""),
             streamer=user.get("display_name", "STREAMER"),
             game=stream.get("game_name") or channel.get("game_name") or "NO GAME SELECTED",
             category=stream.get("game_name") or channel.get("game_name") or "",
             category_id=stream.get("game_id") or channel.get("game_id") or "",
+            title=stream.get("title") or channel.get("title") or "",
             status=self.settings.overlay_status,
             episode=self.settings.overlay_episode,
             custom_message=self.settings.overlay_custom_message,
@@ -181,13 +183,22 @@ class TwitchClient:
             raise TwitchError(f"Helix rechazó /streams ({response.status_code}).")
         streams = response.json().get("data", [])
         stream = streams[0] if streams else {}
+        if not stream:
+            # A stream ID is unique to one broadcast. Never let a prior live
+            # session leak into an offline state and later reopen by mistake.
+            return current.model_copy(update={
+                "twitch_stream_id": "", "is_live": False, "viewer_count": 0,
+                "stream_started_at": None, "title": "",
+            })
         return current.model_copy(update={
-            "is_live": bool(stream),
+            "twitch_stream_id": stream.get("id", ""),
+            "is_live": True,
             "viewer_count": stream.get("viewer_count", 0),
             "stream_started_at": stream.get("started_at"),
             "game": stream.get("game_name") or current.game,
             "category": stream.get("game_name") or current.category,
             "category_id": stream.get("game_id") or current.category_id,
+            "title": stream.get("title", ""),
         })
 
     async def user_by_login(self, login: str) -> dict[str, Any]:

@@ -133,7 +133,7 @@ class EventSubClient:
             changes["last_raid"] = RaidEvent(**data)
         elif event_type == "channel.update":
             data = {"title": event["title"], "category": event.get("category_name", "")}
-            changes.update(game=event.get("category_name", "NO GAME SELECTED"), category=event.get("category_name", ""), category_id=event.get("category_id", ""))
+            changes.update(title=event.get("title", ""), game=event.get("category_name", "NO GAME SELECTED"), category=event.get("category_name", ""), category_id=event.get("category_id", ""))
         else:
             return {}, {}
         return changes, data
