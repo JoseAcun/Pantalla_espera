@@ -5,6 +5,7 @@ import secrets
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -31,6 +32,7 @@ from app.game.models import (
     SeasonInput,
 )
 from app.game.repository import GameRepository
+from app.game.progression import ProgressionConfig
 from app.game.service import GameError
 from app.models import StreamState, SubscriptionEvent
 from app.pokemon import MAX_TEAM_SIZE, PokeApiClient, PokemonError, PokemonTeam, PokemonTeamStore
@@ -139,16 +141,22 @@ def initial_state() -> StreamState:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    settings = get_settings()
     app.state.stream_state = StreamStateStore(initial_state())
     app.state.connections = OverlayConnections()
-    app.state.twitch = TwitchClient(get_settings())
-    app.state.pokemon_team = PokemonTeamStore(get_settings().pokemon_data_dir)
+    app.state.twitch = TwitchClient(settings)
+    app.state.pokemon_team = PokemonTeamStore(settings.pokemon_data_dir)
     await asyncio.to_thread(app.state.pokemon_team.initialize)
     app.state.pokemon_api = PokeApiClient(app.state.pokemon_team)
     app.state.oauth_states = {}
-    database_url = get_settings().database_url
+    database_url = settings.database_url
     app.state.repository = EventRepository(database_url) if database_url else None
-    app.state.game_repository = GameRepository(database_url) if database_url else None
+    progression = ProgressionConfig(
+        base_xp=settings.game_level_base_xp,
+        growth=Decimal(str(settings.game_level_growth)),
+        rounding=settings.game_level_rounding,
+    )
+    app.state.game_repository = GameRepository(database_url, progression) if database_url else None
     if app.state.repository:
         await asyncio.to_thread(app.state.repository.initialize)
         logger.info("MariaDB event persistence enabled")

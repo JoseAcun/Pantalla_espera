@@ -15,6 +15,8 @@ class PlayerProfile(BaseModel):
     level: int = 1
     xp: int = 0
     credits: int = 0
+    xp_in_level: int = 0
+    xp_to_next_level: int = 100
 
 
 class EncounterState(BaseModel):

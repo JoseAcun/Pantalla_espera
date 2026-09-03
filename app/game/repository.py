@@ -1,6 +1,7 @@
 """MariaDB adapter for the first STREAM_OS RPG slice."""
 
 from datetime import datetime, timezone
+from dataclasses import dataclass
 import random
 from typing import Any
 
@@ -28,6 +29,7 @@ from app.game.models import (
     SeasonInput,
     SeasonLeader,
 )
+from app.game.progression import DEFAULT_PROGRESSION, ProgressionConfig, level_from_total_xp, xp_progress_in_level
 from app.game.service import CREDITS_PER_ACTION, XP_PER_ACTION, GAME_TIMEZONE, GameError, boss_intent, new_encounter, quest_period_key, resolve_round
 
 
@@ -36,9 +38,18 @@ def _utc(value: datetime) -> datetime:
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
 
+@dataclass(frozen=True)
+class RewardGrant:
+    granted: bool
+    total_xp: int = 0
+    level_before: int = 1
+    level_after: int = 1
+
+
 class GameRepository:
-    def __init__(self, database_url: str) -> None:
+    def __init__(self, database_url: str, progression: ProgressionConfig = DEFAULT_PROGRESSION) -> None:
         self.engine = create_engine(database_url, pool_pre_ping=True)
+        self.progression = progression
 
     @staticmethod
     def _encounter(row: Any) -> EncounterState:
@@ -340,6 +351,60 @@ class GameRepository:
             ON DUPLICATE KEY UPDATE login = VALUES(login), display_name = VALUES(display_name), last_seen_at = VALUES(last_seen_at)
         """), {"id": actor.user_id, "login": actor.login, "name": actor.display_name, "now": now})
 
+    def _profile(self, row: Any) -> PlayerProfile:
+        values = dict(row._mapping)
+        total_xp = int(values["xp"])
+        values.pop("level", None)
+        level = level_from_total_xp(total_xp, self.progression)
+        progress, required = xp_progress_in_level(total_xp, self.progression)
+        return PlayerProfile(
+            **values,
+            level=level,
+            xp_in_level=progress,
+            xp_to_next_level=required,
+        )
+
+    def grant_reward(self, connection: Any, user_id: str, source_type: str, source_id: str, xp: int, credits: int) -> RewardGrant:
+        """Idempotently grant XP/credits and derive the cached level from total XP."""
+        reward = connection.execute(text("""
+            INSERT IGNORE INTO game_rewards (twitch_user_id, source_type, source_id, xp, credits)
+            VALUES (:user_id, :source_type, :source_id, :xp, :credits)
+        """), {
+            "user_id": user_id, "source_type": source_type, "source_id": source_id,
+            "xp": max(0, int(xp)), "credits": max(0, int(credits)),
+        })
+        if not reward.rowcount:
+            return RewardGrant(granted=False)
+        player = connection.execute(text("""
+            SELECT xp FROM game_players WHERE twitch_user_id = :user_id FOR UPDATE
+        """), {"user_id": user_id}).one()
+        current_xp = int(player.xp)
+        updated_xp = current_xp + max(0, int(xp))
+        level_before = level_from_total_xp(current_xp, self.progression)
+        level_after = level_from_total_xp(updated_xp, self.progression)
+        connection.execute(text("""
+            UPDATE game_players
+            SET xp = :xp, credits = credits + :credits, level = :level
+            WHERE twitch_user_id = :user_id
+        """), {"xp": updated_xp, "credits": max(0, int(credits)), "level": level_after, "user_id": user_id})
+        return RewardGrant(
+            granted=True, total_xp=updated_xp,
+            level_before=level_before, level_after=level_after,
+        )
+
+    def recalculate_levels(self) -> int:
+        """Refresh only the cached level field after a deliberate curve change."""
+        with self.engine.begin() as connection:
+            rows = connection.execute(text("SELECT twitch_user_id, xp FROM game_players FOR UPDATE")).all()
+            if rows:
+                connection.execute(text("""
+                    UPDATE game_players SET level = :level WHERE twitch_user_id = :user_id
+                """), [
+                    {"user_id": row.twitch_user_id, "level": level_from_total_xp(int(row.xp), self.progression)}
+                    for row in rows
+                ])
+        return len(rows)
+
     def register_player(self, actor: ChatActor) -> tuple[PlayerProfile, bool, PublicGameEvent | None]:
         now = datetime.now(timezone.utc)
         with self.engine.begin() as connection:
@@ -355,7 +420,7 @@ class GameRepository:
                 connection, actor.user_id, "player_joined", "NEW PLAYER INITIALIZED", "",
                 f"player-joined:{actor.user_id}", now,
             ) if inserted else None
-        return PlayerProfile(**dict(row._mapping)), inserted, public_event
+        return self._profile(row), inserted, public_event
 
     def player(self, user_id: str) -> PlayerProfile | None:
         with self.engine.connect() as connection:
@@ -363,7 +428,7 @@ class GameRepository:
                 SELECT p.twitch_user_id AS user_id, u.display_name, p.level, p.xp, p.credits
                 FROM game_players p JOIN twitch_users u ON u.twitch_user_id = p.twitch_user_id WHERE p.twitch_user_id = :id
             """), {"id": user_id}).first()
-        return PlayerProfile(**dict(row._mapping)) if row else None
+        return self._profile(row) if row else None
 
     def player_quests(self, user_id: str, category_id: str = "") -> list[PlayerQuest]:
         now = datetime.now(timezone.utc)
@@ -430,11 +495,6 @@ class GameRepository:
               AND (twitch_category_id IS NULL OR twitch_category_id = NULLIF(:category_id, ''))
         """), {"objective_type": objective_type, "category_id": category_id}).all()
         completions: list[QuestCompletion] = []
-        player = connection.execute(text("""
-            SELECT xp, level FROM game_players WHERE twitch_user_id = :user_id FOR UPDATE
-        """), {"user_id": user_id}).one()
-        current_xp = int(player.xp)
-        current_level = int(player.level)
         for row in quests:
             quest = dict(row._mapping)
             period_key = quest_period_key(quest["cadence"], now)
@@ -463,20 +523,12 @@ class GameRepository:
             if not completed:
                 continue
             source_id = f"quest:{quest['id']}:{period_key}"
-            reward = connection.execute(text("""
-                INSERT IGNORE INTO game_rewards (twitch_user_id, source_type, source_id, xp, credits)
-                VALUES (:user_id, 'quest', :source_id, :xp, :credits)
-            """), {"user_id": user_id, "source_id": source_id, "xp": quest["reward_xp"], "credits": quest["reward_credits"]})
-            if not reward.rowcount:
+            grant = self.grant_reward(
+                connection, user_id, "quest", source_id,
+                int(quest["reward_xp"]), int(quest["reward_credits"]),
+            )
+            if not grant.granted:
                 continue
-            level_before = current_level
-            current_xp += int(quest["reward_xp"])
-            current_level = 1 + current_xp // 100
-            connection.execute(text("""
-                UPDATE game_players
-                SET xp = :xp, credits = credits + :credits, level = :level
-                WHERE twitch_user_id = :user_id
-            """), {"xp": current_xp, "credits": quest["reward_credits"], "level": current_level, "user_id": user_id})
             item_name = ""
             if quest["reward_random_item"]:
                 item = self._random_item(connection, category_id)
@@ -500,9 +552,9 @@ class GameRepository:
             )
             if completion_event:
                 public_events.append(completion_event)
-            if current_level > level_before:
+            if grant.level_after > grant.level_before:
                 level_event = self._record_public_event(
-                    connection, user_id, "level_up", "LEVEL INCREASED", f"LV {current_level:02d}",
+                    connection, user_id, "level_up", "LEVEL INCREASED", f"LV {grant.level_after:02d}",
                     f"level-up:{user_id}:{quest['id']}:{period_key}", now,
                 )
                 if level_event:
@@ -510,7 +562,7 @@ class GameRepository:
             completions.append(QuestCompletion(
                 quest_id=int(quest["id"]), period_key=period_key, name=quest["name"],
                 xp=int(quest["reward_xp"]), credits=int(quest["reward_credits"]), item_name=item_name,
-                level_before=level_before, level_after=current_level, public_events=public_events,
+                level_before=grant.level_before, level_after=grant.level_after, public_events=public_events,
             ))
         return completions
 
@@ -599,12 +651,10 @@ class GameRepository:
             """), {**updated.model_dump(), "now": now})
             for action in actions:
                 source_id = f"{state.id}:{state.round_number}"
-                reward = connection.execute(text("""
-                    INSERT IGNORE INTO game_rewards (twitch_user_id, source_type, source_id, xp, credits)
-                    VALUES (:user_id, 'round', :source_id, :xp, :credits)
-                """), {"user_id": action.twitch_user_id, "source_id": source_id, "xp": XP_PER_ACTION, "credits": CREDITS_PER_ACTION})
-                if reward.rowcount:
-                    connection.execute(text("UPDATE game_players SET xp=xp+:xp, credits=credits+:credits WHERE twitch_user_id=:id"), {"xp": XP_PER_ACTION, "credits": CREDITS_PER_ACTION, "id": action.twitch_user_id})
+                self.grant_reward(
+                    connection, action.twitch_user_id, "round", source_id,
+                    XP_PER_ACTION, CREDITS_PER_ACTION,
+                )
         return updated, result
 
     def cancel_active_encounter(self) -> EncounterState | None:

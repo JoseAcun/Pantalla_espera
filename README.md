@@ -182,6 +182,14 @@ Ejecuta `db/002_game_schema.sql` una vez en MariaDB después de la migración in
 
 Los espectadores se registran con `!join` y participan una vez por ronda mediante `!attack`, `!defend` o `!heal`. La fuente de OBS `http://IP_DE_LA_PI:8010/overlay/game/boss` muestra solo el estado colectivo. Después de desplegar esta versión debes renovar OAuth para conceder `user:read:chat` y `user:write:chat`; sin esos permisos el resto del overlay seguirá funcionando, pero el Game Master no recibirá ni podrá responder mensajes.
 
+#### Progresión de niveles
+
+La XP de `game_players` es el total acumulado y la fuente de verdad. El nivel es una caché recalculable: pasar del nivel `L` al siguiente requiere `100 × 1.15^(L-1)` XP, redondeada al múltiplo de 5 más cercano. Los valores se pueden ajustar solo desde `GAME_LEVEL_BASE_XP`, `GAME_LEVEL_GROWTH` y `GAME_LEVEL_ROUNDING`; si los cambias, después de desplegar ejecuta `docker compose exec overlay python -m app.game.recalculate_levels` para actualizar los niveles almacenados sin modificar XP, créditos ni inventario.
+
+`!profile` muestra la XP total y el progreso dentro del nivel actual. Las misiones y las rondas de raid usan la misma concesión idempotente de recompensas, por lo que ambas actualizan el nivel de la misma forma.
+
+Al desplegar esta versión, ejecuta una vez `db/008_level_progression.sql`. Preserva XP, créditos, inventario y progreso de misiones; solo actualiza la caché `game_players.level` con la curva nueva.
+
 ### BRB Community Dashboard
 
 Después de aplicar las migraciones RPG anteriores, ejecuta `db/007_community_dashboard.sql` una vez. La pantalla `http://IP_DE_LA_PI:8010/overlay/brb` sigue mostrando el estado actual del stream y rota, solo cuando hay datos, entre misiones activas, el registro público de actividad y el ranking de temporada. Si MariaDB no está disponible, la BRB conserva el módulo de estado sin interrumpirse.

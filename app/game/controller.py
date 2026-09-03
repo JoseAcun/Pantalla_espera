@@ -44,7 +44,11 @@ class GameController:
         elif name in {"stats", "profile"}:
             profile = await self._thread(self.repository.player, actor.user_id)
             result = "stats returned" if profile else "missing profile"
-            await self._respond(f"[GAME MASTER] {profile.display_name}: LV {profile.level} | XP {profile.xp} | CREDITS {profile.credits}." if profile else "[GAME MASTER] Usa !join para crear tu perfil.")
+            await self._respond(
+                f"[GAME MASTER] {profile.display_name}: LV {profile.level} | XP {profile.xp} "
+                f"({profile.xp_in_level}/{profile.xp_to_next_level} NEXT) | CREDITS {profile.credits}."
+                if profile else "[GAME MASTER] Usa !join para crear tu perfil."
+            )
         elif name in {"missions", "mission", "quests", "quest"}:
             profile = await self._thread(self.repository.player, actor.user_id)
             if not profile:

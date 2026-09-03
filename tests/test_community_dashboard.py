@@ -14,7 +14,7 @@ repository_stub.GameRepository = object
 sys.modules.setdefault("app.game.repository", repository_stub)
 
 from app.game.controller import GameController
-from app.game.models import CommunityDashboard, PublicGameEvent
+from app.game.models import CommunityDashboard, PlayerProfile, PublicGameEvent
 
 
 class JoinRepository:
@@ -29,6 +29,14 @@ class JoinRepository:
             title="NEW PLAYER INITIALIZED", detail="", occurred_at=datetime.now(timezone.utc),
         ) if self.calls == 1 else None
         return profile, self.calls == 1, event
+
+
+class ProfileRepository:
+    def player(self, user_id):
+        return PlayerProfile(
+            user_id=user_id, display_name="KERNELCAT", level=4, xp=455,
+            credits=240, xp_in_level=110, xp_to_next_level=150,
+        )
 
 
 class CommunityDashboardContractTests(unittest.TestCase):
@@ -54,3 +62,17 @@ class CommunityDashboardContractTests(unittest.TestCase):
         self.assertEqual([message["type"] for message in published], ["game.community.event", "game.community.refresh"])
         self.assertEqual(published[0]["data"]["display_name"], "KERNELCAT")
         self.assertEqual(len(replies), 1)  # Chat replies remain rate-limited.
+
+    def test_profile_reports_total_xp_and_next_level_progress(self) -> None:
+        replies = []
+
+        async def publish(_message):
+            pass
+
+        async def reply(message):
+            replies.append(message)
+
+        controller = GameController(ProfileRepository(), publish, reply)
+        event = {"chatter_user_id": "42", "chatter_user_login": "kernelcat", "chatter_user_name": "KERNELCAT", "message": {"text": "!profile"}}
+        asyncio.run(controller.handle_twitch_event("channel.chat.message", event, "message-1"))
+        self.assertIn("LV 4 | XP 455 (110/150 NEXT)", replies[0])

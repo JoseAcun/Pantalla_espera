@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     overlay_episode: str = ""
     overlay_custom_message: str = ""
     viewer_snapshot_interval_seconds: int = Field(default=300, ge=1)
+    game_level_base_xp: int = Field(default=100, ge=1)
+    game_level_growth: float = Field(default=1.15, gt=1)
+    game_level_rounding: int = Field(default=5, ge=1)
 
 
 @lru_cache
