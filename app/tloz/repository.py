@@ -32,7 +32,7 @@ class TlozRepository:
         with self.engine.connect() as connection:
             rows = connection.execute(text("""
                 SELECT id, slug, title, COALESCE(twitch_category_id, '') AS twitch_category_id,
-                       chronology_order, era, release_year, platform, layout_key, enabled
+                       chronology_order, era, timeline_branch, release_year, platform, layout_key, enabled
                 FROM tloz_games ORDER BY chronology_order, title
             """)).all()
         return [_model(TlozGame, row) for row in rows]
@@ -42,8 +42,8 @@ class TlozRepository:
         try:
             with self.engine.begin() as connection:
                 result = connection.execute(text("""
-                    INSERT INTO tloz_games (slug, title, twitch_category_id, chronology_order, era, release_year, platform, layout_key, enabled)
-                    VALUES (:slug, :title, NULLIF(:twitch_category_id, ''), :chronology_order, :era, :release_year, :platform, :layout_key, :enabled)
+                    INSERT INTO tloz_games (slug, title, twitch_category_id, chronology_order, era, timeline_branch, release_year, platform, layout_key, enabled)
+                    VALUES (:slug, :title, NULLIF(:twitch_category_id, ''), :chronology_order, :era, :timeline_branch, :release_year, :platform, :layout_key, :enabled)
                 """), data)
                 row = self._game_row(connection, result.lastrowid)
         except IntegrityError as error:
@@ -55,7 +55,7 @@ class TlozRepository:
             with self.engine.begin() as connection:
                 changed = connection.execute(text("""
                     UPDATE tloz_games SET slug=:slug, title=:title, twitch_category_id=NULLIF(:twitch_category_id, ''),
-                        chronology_order=:chronology_order, era=:era, release_year=:release_year,
+                        chronology_order=:chronology_order, era=:era, timeline_branch=:timeline_branch, release_year=:release_year,
                         platform=:platform, layout_key=:layout_key, enabled=:enabled WHERE id=:id
                 """), {**payload.model_dump(), "id": game_id})
                 if not changed.rowcount:
@@ -68,7 +68,7 @@ class TlozRepository:
     def zones(self, game_id: int) -> list[TlozZone]:
         with self.engine.connect() as connection:
             rows = connection.execute(text("""
-                SELECT id, game_id, name, chronology_order FROM tloz_zones
+                SELECT id, game_id, COALESCE(slug, '') AS slug, name, chronology_order FROM tloz_zones
                 WHERE game_id=:game_id ORDER BY chronology_order, id
             """), {"game_id": game_id}).all()
         return [_model(TlozZone, row) for row in rows]
@@ -77,23 +77,24 @@ class TlozRepository:
         with self.engine.begin() as connection:
             self._game_row(connection, game_id)
             result = connection.execute(text("""
-                INSERT INTO tloz_zones (game_id, name, chronology_order) VALUES (:game_id, :name, :chronology_order)
+                INSERT INTO tloz_zones (game_id, slug, name, chronology_order)
+                VALUES (:game_id, NULLIF(:slug, ''), :name, :chronology_order)
             """), {**payload.model_dump(), "game_id": game_id})
-            row = connection.execute(text("SELECT id, game_id, name, chronology_order FROM tloz_zones WHERE id=:id"), {"id": result.lastrowid}).one()
+            row = connection.execute(text("SELECT id, game_id, COALESCE(slug, '') AS slug, name, chronology_order FROM tloz_zones WHERE id=:id"), {"id": result.lastrowid}).one()
         return _model(TlozZone, row)
 
     def update_zone(self, zone_id: int, payload: TlozZoneInput) -> TlozZone:
         with self.engine.begin() as connection:
-            changed = connection.execute(text("UPDATE tloz_zones SET name=:name, chronology_order=:chronology_order WHERE id=:id"), {**payload.model_dump(), "id": zone_id})
+            changed = connection.execute(text("UPDATE tloz_zones SET slug=NULLIF(:slug, ''), name=:name, chronology_order=:chronology_order WHERE id=:id"), {**payload.model_dump(), "id": zone_id})
             if not changed.rowcount:
                 raise GameError("La zona ya no existe.")
-            row = connection.execute(text("SELECT id, game_id, name, chronology_order FROM tloz_zones WHERE id=:id"), {"id": zone_id}).one()
+            row = connection.execute(text("SELECT id, game_id, COALESCE(slug, '') AS slug, name, chronology_order FROM tloz_zones WHERE id=:id"), {"id": zone_id}).one()
         return _model(TlozZone, row)
 
     def objectives(self, game_id: int, playthrough_id: int | None = None) -> list[TlozObjective]:
         with self.engine.connect() as connection:
             rows = connection.execute(text("""
-                SELECT o.id, o.zone_id, o.title, o.kind, o.chronology_order, o.description, o.enabled,
+                SELECT o.id, o.zone_id, COALESCE(o.slug, '') AS slug, o.title, o.kind, o.chronology_order, o.description, o.enabled,
                        p.completed_at
                 FROM tloz_objectives o JOIN tloz_zones z ON z.id=o.zone_id
                 LEFT JOIN tloz_objective_progress p ON p.objective_id=o.id AND p.playthrough_id=:playthrough_id
@@ -107,11 +108,11 @@ class TlozRepository:
             if not zone:
                 raise GameError("La zona ya no existe.")
             result = connection.execute(text("""
-                INSERT INTO tloz_objectives (zone_id, title, kind, chronology_order, description, enabled)
-                VALUES (:zone_id, :title, :kind, :chronology_order, :description, :enabled)
+                INSERT INTO tloz_objectives (zone_id, slug, title, kind, chronology_order, description, enabled)
+                VALUES (:zone_id, NULLIF(:slug, ''), :title, :kind, :chronology_order, :description, :enabled)
             """), {**payload.model_dump(), "zone_id": zone_id})
             row = connection.execute(text("""
-                SELECT id, zone_id, title, kind, chronology_order, description, enabled, NULL AS completed_at
+                SELECT id, zone_id, COALESCE(slug, '') AS slug, title, kind, chronology_order, description, enabled, NULL AS completed_at
                 FROM tloz_objectives WHERE id=:id
             """), {"id": result.lastrowid}).one()
         return _model(TlozObjective, row)
@@ -119,13 +120,13 @@ class TlozRepository:
     def update_objective(self, objective_id: int, payload: TlozObjectiveInput) -> TlozObjective:
         with self.engine.begin() as connection:
             changed = connection.execute(text("""
-                UPDATE tloz_objectives SET title=:title, kind=:kind, chronology_order=:chronology_order,
+                UPDATE tloz_objectives SET slug=NULLIF(:slug, ''), title=:title, kind=:kind, chronology_order=:chronology_order,
                     description=:description, enabled=:enabled WHERE id=:id
             """), {**payload.model_dump(), "id": objective_id})
             if not changed.rowcount:
                 raise GameError("El objetivo ya no existe.")
             row = connection.execute(text("""
-                SELECT id, zone_id, title, kind, chronology_order, description, enabled, NULL AS completed_at
+                SELECT id, zone_id, COALESCE(slug, '') AS slug, title, kind, chronology_order, description, enabled, NULL AS completed_at
                 FROM tloz_objectives WHERE id=:id
             """), {"id": objective_id}).one()
         return _model(TlozObjective, row)
@@ -195,7 +196,7 @@ class TlozRepository:
     def _game_row(self, connection: Any, game_id: int) -> Any:
         row = connection.execute(text("""
             SELECT id, slug, title, COALESCE(twitch_category_id, '') AS twitch_category_id,
-                   chronology_order, era, release_year, platform, layout_key, enabled
+                   chronology_order, era, timeline_branch, release_year, platform, layout_key, enabled
             FROM tloz_games WHERE id=:id
         """), {"id": game_id}).first()
         if not row:
@@ -207,7 +208,7 @@ class TlozRepository:
             return None
         row = connection.execute(text("""
             SELECT id, slug, title, COALESCE(twitch_category_id, '') AS twitch_category_id,
-                   chronology_order, era, release_year, platform, layout_key, enabled
+                   chronology_order, era, timeline_branch, release_year, platform, layout_key, enabled
             FROM tloz_games WHERE twitch_category_id=:category_id AND enabled=TRUE
         """), {"category_id": category_id}).first()
         return _model(TlozGame, row) if row else None
@@ -246,19 +247,19 @@ class TlozRepository:
 
     def _overlay_state(self, connection: Any, game: TlozGame, playthrough: Any, category_id: str, stream_id: str) -> TlozOverlayState:
         timeline_rows = connection.execute(text("""
-            SELECT title, era FROM tloz_games WHERE enabled=TRUE ORDER BY chronology_order, title
+            SELECT title, era, timeline_branch FROM tloz_games WHERE enabled=TRUE ORDER BY chronology_order, title
         """)).all()
         if not playthrough:
             return TlozOverlayState(active=True, twitch_category_id=category_id, twitch_stream_id=stream_id, game=game,
-                timeline=[TlozTimelineEntry(title=row.title, era=row.era, current=row.title == game.title) for row in timeline_rows])
+                timeline=[TlozTimelineEntry(title=row.title, era=row.era, timeline_branch=row.timeline_branch, current=row.title == game.title) for row in timeline_rows])
         zone = None
         if playthrough["current_zone_id"]:
-            row = connection.execute(text("SELECT id, game_id, name, chronology_order FROM tloz_zones WHERE id=:id"), {"id": playthrough["current_zone_id"]}).first()
+            row = connection.execute(text("SELECT id, game_id, COALESCE(slug, '') AS slug, name, chronology_order FROM tloz_zones WHERE id=:id"), {"id": playthrough["current_zone_id"]}).first()
             zone = _model(TlozZone, row) if row else None
         objective = None
         if playthrough["current_objective_id"]:
             row = connection.execute(text("""
-                SELECT o.id, o.zone_id, o.title, o.kind, o.chronology_order, o.description, o.enabled, p.completed_at
+                SELECT o.id, o.zone_id, COALESCE(o.slug, '') AS slug, o.title, o.kind, o.chronology_order, o.description, o.enabled, p.completed_at
                 FROM tloz_objectives o LEFT JOIN tloz_objective_progress p
                   ON p.objective_id=o.id AND p.playthrough_id=:playthrough_id WHERE o.id=:id
             """), {"id": playthrough["current_objective_id"], "playthrough_id": playthrough["id"]}).first()
@@ -273,4 +274,4 @@ class TlozRepository:
         recap = [TlozPreviouslyEntry(text=labels[row.event_type](row), occurred_at=row.occurred_at) for row in events if row.event_type in labels and labels[row.event_type](row).rstrip(": ")]
         return TlozOverlayState(active=True, twitch_category_id=category_id, twitch_stream_id=stream_id, game=game,
             console_name=playthrough["console_name"], current_zone=zone, current_objective=objective,
-            special_state=playthrough["special_state"], timeline=[TlozTimelineEntry(title=row.title, era=row.era, current=row.title == game.title) for row in timeline_rows], previously=recap)
+            special_state=playthrough["special_state"], timeline=[TlozTimelineEntry(title=row.title, era=row.era, timeline_branch=row.timeline_branch, current=row.title == game.title) for row in timeline_rows], previously=recap)

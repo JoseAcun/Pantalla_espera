@@ -9,6 +9,7 @@ class TlozGameInput(BaseModel):
     twitch_category_id: str = Field(default="", max_length=32)
     chronology_order: int = Field(default=100, ge=1, le=10_000)
     era: str = Field(default="", max_length=80)
+    timeline_branch: str = Field(default="", max_length=80)
     release_year: int | None = Field(default=None, ge=1980, le=2100)
     platform: str = Field(default="", max_length=80)
     layout_key: str = Field(default="16_9", pattern=r"^(16_9|4_3|handheld|ds|3ds)$")
@@ -20,6 +21,8 @@ class TlozGame(TlozGameInput):
 
 
 class TlozZoneInput(BaseModel):
+    # Empty is kept for zones created by the first manual panel version.
+    slug: str = Field(default="", max_length=80, pattern=r"^$|^[a-z0-9]+(?:[-_][a-z0-9]+)*$")
     name: str = Field(min_length=2, max_length=160)
     chronology_order: int = Field(default=100, ge=1, le=10_000)
 
@@ -30,6 +33,8 @@ class TlozZone(TlozZoneInput):
 
 
 class TlozObjectiveInput(BaseModel):
+    # Catalog imports always provide a slug; legacy/manual records may not.
+    slug: str = Field(default="", max_length=80, pattern=r"^$|^[a-z0-9]+(?:[-_][a-z0-9]+)*$")
     title: str = Field(min_length=2, max_length=255)
     kind: str = Field(default="required", pattern=r"^(required|optional)$")
     chronology_order: int = Field(default=100, ge=1, le=10_000)
@@ -54,6 +59,7 @@ class TlozCurrentUpdate(BaseModel):
 class TlozTimelineEntry(BaseModel):
     title: str
     era: str = ""
+    timeline_branch: str = ""
     current: bool = False
 
 

@@ -211,6 +211,16 @@ unset DB_PASSWORD
 
 Abre `http://192.168.1.50:8010/admin/pokemon`, escribe el valor de `OVERLAY_ADMIN_TOKEN`, y configura hasta seis Pokémon con apodo opcional. Al guardar, el backend consulta PokéAPI y conserva el sprite en el volumen `/data`; por ello el overlay sigue mostrando el equipo aunque PokéAPI no esté disponible durante el stream. En OBS añade una Browser Source transparente con `http://192.168.1.50:8010/overlay/pokemon`, a la resolución de tu lienzo. La barra lateral se actualiza en vivo al guardar un cambio.
 
+### Catálogo TLOZ
+
+Después de `db/009_tloz_progress.sql`, aplica también `db/010_tloz_catalog_slugs.sql` y reconstruye el contenedor. El catálogo versionado se importa sin duplicar filas con:
+
+```bash
+docker compose exec overlay python -m app.tloz.import_catalog
+```
+
+Incluye una cronología base y contenido inicial de Skyward Sword y The Minish Cap. Los IDs de Twitch no se incluyen a propósito: con el directo ya puesto en el juego, consulta `http://IP_DE_LA_PI:8010/api/state`, copia `category_id` y vincúlalo una vez al juego desde `http://IP_DE_LA_PI:8010/admin/tloz`. Consulta `docs/tloz-progress.md` para el modelo, las Browser Sources y el proceso completo.
+
 ### Actualizar desde GitHub
 
 ```bash

@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "game_slug": "skyward-sword",
+  "zones": [
+    {
+      "slug": "knight-academy",
+      "name": "Academia de Caballeros",
+      "chronology_order": 10,
+      "objectives": [
+        {"slug":"wake-for-wing-ceremony","title":"Prepararse para la ceremonia del Ala","kind":"required","chronology_order":10,"description":"Presenta a Link como alumno de la Academia y prepara el inicio de la aventura."},
+        {"slug":"find-pipit-crimson-loftwing","title":"Encontrar al Pelícaro Carmesí","kind":"required","chronology_order":20,"description":"Recupera al Pelícaro de Link para poder competir en la ceremonia."},
+        {"slug":"win-wing-ceremony","title":"Ganar la ceremonia del Ala","kind":"required","chronology_order":30,"description":"Consigue la Estatua de Ave y celebra junto a Zelda."}
+      ]
+    },
+    {
+      "slug": "skyloft-and-sky",
+      "name": "Altárea y el Cielo",
+      "chronology_order": 20,
+      "objectives": [
+        {"slug":"follow-zelda-tornado","title":"Seguir el rastro de Zelda tras el tornado","kind":"required","chronology_order":10,"description":"El remolino separa a Zelda de Link y revela la llamada de Fay."},
+        {"slug":"obtain-goddess-sword","title":"Obtener la Espada Divina","kind":"required","chronology_order":20,"description":"La espada de Fay permite iniciar el viaje hacia la superficie."},
+        {"slug":"activate-first-light-pillar","title":"Activar el primer pilar de luz","kind":"required","chronology_order":30,"description":"Abre la ruta hacia la región de Farone."},
+        {"slug":"explore-sky-islands","title":"Explorar islas del cielo","kind":"optional","chronology_order":40,"description":"Busca cofres, cristales de gratitud y rutas secundarias entre las islas."}
+      ]
+    },
+    {
+      "slug": "faron-woods",
+      "name": "Bosque de Farone",
+      "chronology_order": 30,
+      "objectives": [
+        {"slug":"meet-kiwi-hermit","title":"Seguir las pistas de los kyu","kind":"required","chronology_order":10,"description":"Encuentra el camino y aprende qué ocurrió con Zelda en el bosque."},
+        {"slug":"rescue-kyu","title":"Rescatar a los kyu dispersos","kind":"required","chronology_order":20,"description":"Recupera a los habitantes del bosque para abrir el acceso al templo."},
+        {"slug":"find-skyview-key","title":"Localizar la llave del Templo de la Contemplación","kind":"required","chronology_order":30,"description":"Completa el paso necesario para entrar a la primera mazmorra."}
+      ]
+    },
+    {
+      "slug": "skyview-temple",
+      "name": "Templo de la Contemplación",
+      "chronology_order": 40,
+      "objectives": [
+        {"slug":"obtain-beetle","title":"Conseguir el Escarabajo","kind":"required","chronology_order":10,"description":"El objeto clave permite activar interruptores y alcanzar mecanismos a distancia."},
+        {"slug":"rescue-zelda-skyview","title":"Llegar hasta Zelda","kind":"required","chronology_order":20,"description":"Alcanza a Zelda justo antes del encuentro con Ghirahim."},
+        {"slug":"defeat-ghirahim-skyview","title":"Derrotar a Ghirahim","kind":"required","chronology_order":30,"description":"Primer duelo contra el Señor Demonio en la salida del templo."}
+      ]
+    },
+    {
+      "slug": "eldin-volcano",
+      "name": "Volcán Eldin",
+      "chronology_order": 50,
+      "objectives": [
+        {"slug":"reach-eldin","title":"Llegar al Volcán Eldin","kind":"required","chronology_order":10,"description":"Sigue el siguiente pilar de luz hasta la región volcánica."},
+        {"slug":"meet-mogma","title":"Conocer a los mogma","kind":"required","chronology_order":20,"description":"Obtén información sobre Zelda y los pasadizos subterráneos."},
+        {"slug":"recover-eldin-tablet","title":"Encontrar la ruta al Templo Terrenal","kind":"required","chronology_order":30,"description":"Reúne las pistas que llevan a la mazmorra del fuego."},
+        {"slug":"collect-eldin-treasures","title":"Buscar tesoros del volcán","kind":"optional","chronology_order":40,"description":"Aprovecha la zona para recolectar materiales de mejora."}
+      ]
+    },
+    {
+      "slug": "earth-temple",
+      "name": "Templo Terrenal",
+      "chronology_order": 60,
+      "objectives": [
+        {"slug":"obtain-bomb-bag","title":"Obtener la Bolsa de Bombas","kind":"required","chronology_order":10,"description":"Desbloquea paredes agrietadas y mecanismos explosivos."},
+        {"slug":"free-zelda-earth-temple","title":"Seguir el rastro de Zelda y Impa","kind":"required","chronology_order":20,"description":"Avanza por el templo hasta el puente destruido por el perseguidor."},
+        {"slug":"defeat-scaldera","title":"Derrotar a Scaldera","kind":"required","chronology_order":30,"description":"Vence al jefe rodante que bloquea el camino hacia el santuario."}
+      ]
+    },
+    {
+      "slug": "lanayru-desert",
+      "name": "Desierto de Lanayru",
+      "chronology_order": 70,
+      "objectives": [
+        {"slug":"activate-timeshift-stones","title":"Activar piedras de cambio temporal","kind":"required","chronology_order":10,"description":"Restaura partes de Lanayru para descubrir sus instalaciones antiguas."},
+        {"slug":"meet-gondo","title":"Conocer a Gondo y reparar el Escarabajo","kind":"optional","chronology_order":20,"description":"Mejora el Escarabajo para alcanzar puntos más lejanos."},
+        {"slug":"reach-mining-facility","title":"Abrir la ruta a la instalación minera","kind":"required","chronology_order":30,"description":"Resuelve los mecanismos del desierto para entrar a la siguiente mazmorra."}
+      ]
+    },
+    {
+      "slug": "lanayru-mining-facility",
+      "name": "Instalación Minera de Lanayru",
+      "chronology_order": 80,
+      "objectives": [
+        {"slug":"obtain-gust-bellows","title":"Obtener el Jarrón de Aire","kind":"required","chronology_order":10,"description":"El objeto permite mover arena, turbinas y enemigos ligeros."},
+        {"slug":"restore-generator","title":"Restaurar el generador principal","kind":"required","chronology_order":20,"description":"Combina pasado y presente para abrir el acceso final."},
+        {"slug":"defeat-moldarach","title":"Derrotar a Moldarach","kind":"required","chronology_order":30,"description":"Supera al guardián escorpión de la instalación."}
+      ]
+    },
+    {
+      "slug": "sacred-flames",
+      "name": "Llamas Sagradas",
+      "chronology_order": 90,
+      "objectives": [
+        {"slug":"complete-farore-trial","title":"Superar la prueba de Farore","kind":"required","chronology_order":10,"description":"Obtén la segunda mejora de la Espada Divina tras el Reino del Silencio."},
+        {"slug":"complete-nayru-trial","title":"Superar la prueba de Nayru","kind":"required","chronology_order":20,"description":"Consigue los objetos necesarios para continuar la búsqueda de la llama."},
+        {"slug":"complete-din-trial","title":"Superar la prueba de Din","kind":"required","chronology_order":30,"description":"Completa la última prueba espiritual antes de la etapa final."},
+        {"slug":"upgrade-goddess-sword","title":"Mejorar la espada con las llamas","kind":"required","chronology_order":40,"description":"Convierte la Espada Divina en la Espada Maestra."}
+      ]
+    },
+    {
+      "slug": "ancient-cistern",
+      "name": "Gran Aljibe",
+      "chronology_order": 100,
+      "objectives": [
+        {"slug":"obtain-whip","title":"Obtener el Látigo","kind":"required","chronology_order":10,"description":"Permite accionar palancas y desarmar enemigos."},
+        {"slug":"cross-underworld","title":"Atravesar la sección subterránea","kind":"required","chronology_order":20,"description":"Asciende desde el inframundo del aljibe hasta el jefe."},
+        {"slug":"defeat-koloktos","title":"Derrotar a Koloktos","kind":"required","chronology_order":30,"description":"Vence al autómata dorado y usa sus armas contra él."}
+      ]
+    },
+    {
+      "slug": "sandship",
+      "name": "Nave de Arena",
+      "chronology_order": 110,
+      "objectives": [
+        {"slug":"board-sandship","title":"Abordar la Nave de Arena","kind":"required","chronology_order":10,"description":"Encuentra y sigue el barco mediante los cambios temporales."},
+        {"slug":"obtain-bow","title":"Obtener el Arco","kind":"required","chronology_order":20,"description":"Desbloquea interruptores y combate a distancia."},
+        {"slug":"defeat-tentalus","title":"Derrotar a Tentalus","kind":"required","chronology_order":30,"description":"Protege la nave del monstruo marino y supera el combate final del barco."}
+      ]
+    },
+    {
+      "slug": "fire-sanctuary-and-ending",
+      "name": "Santuario del Fuego y desenlace",
+      "chronology_order": 120,
+      "objectives": [
+        {"slug":"enter-fire-sanctuary","title":"Entrar al Santuario del Fuego","kind":"required","chronology_order":10,"description":"Sigue a los mogma hasta la última mazmorra principal."},
+        {"slug":"obtain-mogma-mitts","title":"Obtener los Guantes Mogma","kind":"required","chronology_order":20,"description":"Excava y abre rutas necesarias hacia la prisión."},
+        {"slug":"defeat-ghirahim-final","title":"Vencer a Ghirahim en el pasado","kind":"required","chronology_order":30,"description":"Impide el ritual que intenta devolver al Heraldo al mundo."},
+        {"slug":"defeat-demise","title":"Derrotar al Heraldo","kind":"required","chronology_order":40,"description":"Cierra la aventura principal y el origen del ciclo de la leyenda."},
+        {"slug":"complete-goddess-cubes","title":"Completar Cubos Divinos restantes","kind":"optional","chronology_order":50,"description":"Limpieza opcional para cofres y mejoras antes o después del final."}
+      ]
+    }
+  ]
+}

@@ -11,6 +11,7 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir --requirement requirements.txt
 
 COPY app ./app
+COPY data/tloz ./data/tloz
 RUN mkdir /data && chown overlay:overlay /data
 
 USER overlay

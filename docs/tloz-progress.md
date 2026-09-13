@@ -12,11 +12,13 @@ Esta capa añade seguimiento editorial de **Juego → Zonas → Objetivos** sin 
 
 ## Modelo persistido
 
-La migración `db/009_tloz_progress.sql` crea exclusivamente estas tablas:
+La migración `db/009_tloz_progress.sql` crea exclusivamente estas tablas. La
+migración aditiva `db/010_tloz_catalog_slugs.sql` añade slugs estables para el
+catálogo y conserva íntegras las filas manuales existentes.
 
-- `tloz_games`: catálogo, relación única opcional `twitch_category_id`, orden de cronología y layout.
-- `tloz_zones`: zonas ordenadas de un juego.
-- `tloz_objectives`: objetivos ordenados de una zona, marcados como `required` u `optional`.
+- `tloz_games`: catálogo, relación única opcional `twitch_category_id`, era/rama, orden de cronología y layout.
+- `tloz_zones`: zonas ordenadas de un juego, con slug estable para importación.
+- `tloz_objectives`: objetivos ordenados de una zona, con slug y etiqueta `required` u `optional`.
 - `tloz_playthroughs`: consola, zona, objetivo y estado especial actuales. Guarda el `twitch_stream_id` automáticamente cuando Twitch lo tenga.
 - `tloz_objective_progress` y `tloz_progress_events`: completados e historial para el recap persistente.
 
@@ -25,7 +27,7 @@ No hay porcentajes, recomendaciones de ruta, detección dentro del juego, achiev
 ## Flujo del panel y API
 
 1. En Twitch, cambia la categoría al juego correspondiente. El backend ya la recibe mediante Helix/EventSub.
-2. Abre `/admin/tloz`, introduce `OVERLAY_ADMIN_TOKEN` y crea el juego con su **ID de categoría Twitch**. Ese ID se obtiene del catálogo existente de categorías o de la respuesta de Twitch; se registra una vez, no en cada stream.
+2. Abre `/admin/tloz`, introduce `OVERLAY_ADMIN_TOKEN` y vincula el juego con su **ID de categoría Twitch**. El catálogo no inventa IDs: el campo queda vacío hasta capturarlo desde el estado Twitch existente. Con el directo en esa categoría, consulta `GET /api/state` y copia `category_id`, o usa el catálogo de categorías detectadas en `/admin/game`; después edita ese juego desde el panel/API para guardarlo una sola vez.
 3. Crea zonas y objetivos. En el bloque **Directo actual**, guarda consola, zona, objetivo y, solo cuando haga falta, una situación breve como `Combate con Gohma`.
 4. Marca “completado” junto con el objetivo seleccionado para añadirlo al historial. El panel no avanza objetivos automáticamente.
 
@@ -56,16 +58,36 @@ Antes de actualizar el contenedor, aplica una sola vez la migración usando el u
 ```bash
 read -s -p "Clave MariaDB: " DB_PASSWORD; echo
 docker exec -i -e MYSQL_PWD="$DB_PASSWORD" mariadb mariadb -u root twitch_overlay < db/009_tloz_progress.sql
+docker exec -i -e MYSQL_PWD="$DB_PASSWORD" mariadb mariadb -u root twitch_overlay < db/010_tloz_catalog_slugs.sql
 unset DB_PASSWORD
 docker compose up --build --detach
 docker compose logs --tail=100 overlay
 ```
 
-La migración es aditiva e idempotente para reintentarla de forma segura; no borra tablas ni datos históricos.
+Las migraciones son aditivas e idempotentes para reintentarlas de forma segura; no borran tablas ni datos históricos.
+
+## Catálogo inicial versionado
+
+`data/tloz/chronology.json` contiene 19 juegos principales, orden de presentación
+único, era/rama, plataforma, layout y un `twitch_category_id` deliberadamente
+vacío. `skyward-sword.game.json` y `the-minish-cap.game.json` contienen, como
+primeros ejemplos completos, 22 zonas y 71 objetivos de contexto para stream.
+No son walkthroughs exhaustivos.
+
+Después de aplicar `009` y `010`, y ya con la imagen actualizada, impórtalo así:
+
+```bash
+docker compose exec overlay python -m app.tloz.import_catalog
+```
+
+El importador valida **todos** los JSON antes de escribir y hace upsert por slug
+de juego/zona/objetivo. Se puede ejecutar de nuevo al actualizar el catálogo:
+actualiza títulos, orden y texto editorial, pero nunca elimina playthroughs ni
+progreso de jugadores.
 
 ## Validación manual
 
 1. Comprueba `curl http://IP:8010/api/tloz/current`: inicialmente devuelve `active: false` hasta mapear la categoría.
-2. Crea un juego con el ID de categoría actualmente detectado, zonas y objetivos en `/admin/tloz`.
+2. Ejecuta el importador, vincula con el `category_id` actualmente detectado y recarga `/admin/tloz`.
 3. Guarda la consola/zona/objetivo, marca uno completado y confirma que aparece en `/overlay/tloz/starting-soon` y en la rotación BRB.
 4. Cambia la categoría en Twitch a una no vinculada: las fuentes TLOZ se ocultan, mientras RPG y analítica continúan intactos.

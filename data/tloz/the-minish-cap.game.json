@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "game_slug": "the-minish-cap",
+  "zones": [
+    {
+      "slug": "hyrule-town-festival",
+      "name": "Ciudadela de Hyrule y Festival Picori",
+      "chronology_order": 10,
+      "objectives": [
+        {"slug":"visit-picori-festival","title":"Visitar el Festival Picori","kind":"required","chronology_order":10,"description":"Acompaña a Zelda al festival y participa en la ceremonia de la espada."},
+        {"slug":"meet-ezlo","title":"Conocer a Ezlo","kind":"required","chronology_order":20,"description":"Encuentra el gorro parlante que guiará a Link durante toda la aventura."},
+        {"slug":"learn-minish-shrine","title":"Descubrir el Santuario Minish","kind":"required","chronology_order":30,"description":"Obtén la primera pista para restaurar la Espada Picori."}
+      ]
+    },
+    {
+      "slug": "minish-woods",
+      "name": "Bosque Minish",
+      "chronology_order": 20,
+      "objectives": [
+        {"slug":"shrink-at-minish-portal","title":"Aprender a reducirse al tamaño minish","kind":"required","chronology_order":10,"description":"Usa un portal para entrar al mundo diminuto."},
+        {"slug":"meet-festari","title":"Hablar con Festari","kind":"required","chronology_order":20,"description":"Conoce a los minish y recibe dirección para continuar."},
+        {"slug":"recover-earth-element-clue","title":"Seguir la pista del Elemento Tierra","kind":"required","chronology_order":30,"description":"Prepara la entrada a la primera mazmorra."}
+      ]
+    },
+    {
+      "slug": "deepwood-shrine",
+      "name": "Santuario del Bosque",
+      "chronology_order": 30,
+      "objectives": [
+        {"slug":"obtain-gust-jar","title":"Obtener el Jarrón Mágico","kind":"required","chronology_order":10,"description":"Absorbe polvo, telarañas y enemigos para abrir caminos."},
+        {"slug":"defeat-big-green-chuchu","title":"Derrotar al Gran Chuchu Verde","kind":"required","chronology_order":20,"description":"Supera el primer jefe y reclama el Elemento Tierra."},
+        {"slug":"restore-picori-blade-once","title":"Forjar la Espada Picori por primera vez","kind":"required","chronology_order":30,"description":"Entrega el elemento para restaurar parte de la espada."}
+      ]
+    },
+    {
+      "slug": "mount-crenel",
+      "name": "Monte Crenel",
+      "chronology_order": 40,
+      "objectives": [
+        {"slug":"reach-crenel-minish","title":"Encontrar a los minish del monte","kind":"required","chronology_order":10,"description":"Avanza por la montaña con los cambios de tamaño."},
+        {"slug":"obtain-grip-ring","title":"Conseguir el Anillo de Agarre","kind":"required","chronology_order":20,"description":"Permite escalar paredes rugosas y atajos verticales."},
+        {"slug":"find-cave-of-flames","title":"Abrir la Cueva de las Llamas","kind":"required","chronology_order":30,"description":"Localiza el acceso a la mazmorra del segundo elemento."}
+      ]
+    },
+    {
+      "slug": "cave-of-flames",
+      "name": "Cueva de las Llamas",
+      "chronology_order": 50,
+      "objectives": [
+        {"slug":"obtain-cane-of-pacci","title":"Obtener el Báculo de Pacci","kind":"required","chronology_order":10,"description":"Invierte objetos y agujeros para progresar."},
+        {"slug":"defeat-gleerok","title":"Derrotar a Gleerok","kind":"required","chronology_order":20,"description":"Vence al jefe de roca y consigue el Elemento Fuego."},
+        {"slug":"restore-picori-blade-twice","title":"Restaurar la Espada Picori con el Elemento Fuego","kind":"required","chronology_order":30,"description":"La espada gana una nueva capacidad tras la forja."}
+      ]
+    },
+    {
+      "slug": "castor-wilds-and-wind-ruins",
+      "name": "Pantano de Castor y Ruinas del Viento",
+      "chronology_order": 60,
+      "objectives": [
+        {"slug":"obtain-flippers","title":"Obtener las Aletas","kind":"required","chronology_order":10,"description":"Navega los pantanos y canales de Hyrule."},
+        {"slug":"find-wind-tribe","title":"Encontrar a la Tribu del Viento","kind":"required","chronology_order":20,"description":"Sigue el legado de los habitantes del cielo."},
+        {"slug":"enter-fortress-of-winds","title":"Entrar a la Fortaleza de los Vientos","kind":"required","chronology_order":30,"description":"Alcanza la tercera mazmorra de la aventura."}
+      ]
+    },
+    {
+      "slug": "fortress-of-winds",
+      "name": "Fortaleza de los Vientos",
+      "chronology_order": 70,
+      "objectives": [
+        {"slug":"obtain-mole-mitts","title":"Obtener los Guantes de Topo","kind":"required","chronology_order":10,"description":"Excava túneles y revela rutas enterradas."},
+        {"slug":"defeat-mazaal","title":"Derrotar a Mazaal","kind":"required","chronology_order":20,"description":"Vence al guardián gigante de la fortaleza."},
+        {"slug":"restore-picori-blade-third","title":"Restaurar la Espada Picori con el Elemento Viento","kind":"required","chronology_order":30,"description":"La espada queda preparada para la etapa final."}
+      ]
+    },
+    {
+      "slug": "royal-valley-and-graveyard",
+      "name": "Valle Real y Cementerio",
+      "chronology_order": 80,
+      "objectives": [
+        {"slug":"obtain-ocarina-of-wind","title":"Obtener la Ocarina del Viento","kind":"required","chronology_order":10,"description":"Invoca al pájaro para viajar rápidamente por Hyrule."},
+        {"slug":"collect-royal-key","title":"Recuperar la llave real","kind":"required","chronology_order":20,"description":"Accede a las ruinas que custodian el último elemento."},
+        {"slug":"fuse-kinstones","title":"Fusionar piedras de la suerte relevantes","kind":"optional","chronology_order":30,"description":"Abre recompensas y rutas secundarias del reino."}
+      ]
+    },
+    {
+      "slug": "palace-of-winds",
+      "name": "Palacio de los Vientos",
+      "chronology_order": 90,
+      "objectives": [
+        {"slug":"obtain-rocs-cape","title":"Obtener la Capa de Roc","kind":"required","chronology_order":10,"description":"Permite saltar huecos y moverse por plataformas aéreas."},
+        {"slug":"defeat-gyorg-pair","title":"Derrotar a Gyorg Pareja","kind":"required","chronology_order":20,"description":"Vence a los guardianes gemelos del palacio."},
+        {"slug":"restore-four-sword","title":"Completar la Espada Cuádruple","kind":"required","chronology_order":30,"description":"Forja la espada final con el Elemento Viento."}
+      ]
+    },
+    {
+      "slug": "dark-hyrule-castle",
+      "name": "Castillo Oscuro de Hyrule",
+      "chronology_order": 100,
+      "objectives": [
+        {"slug":"enter-dark-castle","title":"Entrar al castillo transformado","kind":"required","chronology_order":10,"description":"Rescata a Zelda y atraviesa las secciones finales."},
+        {"slug":"defeat-vaati-reborn","title":"Derrotar a Vaati","kind":"required","chronology_order":20,"description":"Supera las fases finales del antagonista y restaura Hyrule."},
+        {"slug":"collect-figurines","title":"Completar figuras de Tendo","kind":"optional","chronology_order":30,"description":"Meta de colección opcional para después de la historia principal."}
+      ]
+    }
+  ]
+}
