@@ -38,6 +38,8 @@ from app.models import StreamState, SubscriptionEvent
 from app.pokemon import MAX_TEAM_SIZE, PokeApiClient, PokemonError, PokemonTeam, PokemonTeamStore
 from app.state import StreamStateStore
 from app.twitch import TwitchClient, TwitchError, create_oauth_state
+from app.tloz.models import TlozCurrentUpdate, TlozGame, TlozGameInput, TlozObjective, TlozObjectiveInput, TlozOverlayState, TlozZone, TlozZoneInput
+from app.tloz.repository import TlozRepository
 from app.websocket import OverlayConnections
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -72,6 +74,7 @@ async def refresh_metrics_periodically(app: FastAPI) -> None:
             await persist_stream_analytics(app, refreshed)
             await record_stream_category(app, refreshed, "poll")
             await app.state.connections.broadcast({"type": "stream_state", "data": refreshed.model_dump(mode="json")})
+            await broadcast_tloz_state(app, refreshed)
         except Exception as error:
             logger.warning("Could not refresh live metrics: %s", error)
 
@@ -121,6 +124,23 @@ async def record_stream_category(app: FastAPI, state: StreamState, source: str) 
             logger.exception("Could not persist the Twitch category")
 
 
+async def tloz_state(app: FastAPI, state: StreamState | None = None) -> TlozOverlayState:
+    """Resolve Zelda's active game exclusively from Twitch's current category."""
+    current = state or await app.state.stream_state.get()
+    repository: TlozRepository | None = app.state.tloz_repository
+    if not repository:
+        return TlozOverlayState(twitch_category_id=current.category_id, twitch_stream_id=current.twitch_stream_id)
+    return await asyncio.to_thread(repository.current_state, current.category_id, current.twitch_stream_id)
+
+
+async def broadcast_tloz_state(app: FastAPI, state: StreamState | None = None) -> None:
+    try:
+        payload = await tloz_state(app, state)
+        await app.state.connections.broadcast({"type": "tloz.state", "data": payload.model_dump(mode="json")})
+    except Exception:
+        logger.exception("Could not refresh TLOZ overlay state")
+
+
 def require_admin_token(request: Request) -> None:
     expected = get_settings().overlay_admin_token
     supplied = request.headers.get("X-Overlay-Admin-Token", "")
@@ -157,6 +177,7 @@ async def lifespan(app: FastAPI):
         rounding=settings.game_level_rounding,
     )
     app.state.game_repository = GameRepository(database_url, progression) if database_url else None
+    app.state.tloz_repository = TlozRepository(database_url) if database_url else None
     if app.state.repository:
         await asyncio.to_thread(app.state.repository.initialize)
         logger.info("MariaDB event persistence enabled")
@@ -164,7 +185,11 @@ async def lifespan(app: FastAPI):
         return (await app.state.stream_state.get()).category_id
 
     app.state.game_controller = GameController(app.state.game_repository, app.state.connections.broadcast, app.state.twitch.send_chat_message, current_game_category) if app.state.game_repository else None
-    app.state.eventsub = EventSubClient(app.state.twitch, app.state.stream_state, app.state.connections.broadcast, app.state.repository, app.state.game_controller.handle_twitch_event if app.state.game_controller else None)
+    app.state.eventsub = EventSubClient(
+        app.state.twitch, app.state.stream_state, app.state.connections.broadcast,
+        app.state.repository, app.state.game_controller.handle_twitch_event if app.state.game_controller else None,
+        lambda state: broadcast_tloz_state(app, state),
+    )
     if app.state.twitch.access_token():
         try:
             hydrated = await app.state.twitch.hydrate_state()
@@ -172,6 +197,7 @@ async def lifespan(app: FastAPI):
             await persist_hydrated_follower(app, hydrated)
             await persist_stream_analytics(app, hydrated)
             await record_stream_category(app, hydrated, "startup")
+            await broadcast_tloz_state(app, hydrated)
             app.state.eventsub.start()
         except Exception as error:
             logger.warning("Could not restore Twitch state at startup: %s", error)
@@ -254,6 +280,7 @@ async def twitch_auth_poll(request: Request) -> dict[str, object]:
         await record_stream_category(request.app, stream_state, "oauth")
         await request.app.state.eventsub.restore_from_repository()
         await request.app.state.connections.broadcast({"type": "stream_state", "data": stream_state.model_dump(mode="json")})
+        await broadcast_tloz_state(request.app, stream_state)
         request.app.state.eventsub.start()
         request.app.state.device_authorization = None
         return {"connected": True, "message": "Twitch conectado."}
@@ -280,6 +307,7 @@ async def twitch_auth_callback(request: Request, code: str | None = None, state:
         await persist_stream_analytics(request.app, stream_state)
         await record_stream_category(request.app, stream_state, "oauth")
         await request.app.state.connections.broadcast({"type": "stream_state", "data": stream_state.model_dump(mode="json")})
+        await broadcast_tloz_state(request.app, stream_state)
         request.app.state.eventsub.start()
     except TwitchError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -356,6 +384,7 @@ async def twitch_sync(request: Request) -> StreamState:
     await persist_stream_analytics(request.app, state)
     await record_stream_category(request.app, state, "sync")
     await request.app.state.connections.broadcast({"type": "stream_state", "data": state.model_dump(mode="json")})
+    await broadcast_tloz_state(request.app, state)
     return state
 
 
@@ -363,6 +392,13 @@ def game_repository_or_503(request: Request) -> GameRepository:
     repository: GameRepository | None = request.app.state.game_repository
     if not repository:
         raise HTTPException(status_code=503, detail="DATABASE_URL no está configurada para el RPG.")
+    return repository
+
+
+def tloz_repository_or_503(request: Request) -> TlozRepository:
+    repository: TlozRepository | None = request.app.state.tloz_repository
+    if not repository:
+        raise HTTPException(status_code=503, detail="DATABASE_URL no está configurada para TLOZ.")
     return repository
 
 
@@ -489,6 +525,100 @@ async def update_game_quest(quest_id: int, payload: QuestDefinitionUpdate, reque
         raise HTTPException(status_code=404, detail=str(error)) from error
 
 
+@app.get("/api/tloz/current", response_model=TlozOverlayState)
+async def get_tloz_current(request: Request) -> TlozOverlayState:
+    """Public Browser Source data. The selected game always comes from Twitch."""
+    return await tloz_state(request.app)
+
+
+@app.get("/api/tloz/games", response_model=list[TlozGame])
+async def list_tloz_games(request: Request) -> list[TlozGame]:
+    require_admin_token(request)
+    return await asyncio.to_thread(tloz_repository_or_503(request).games)
+
+
+@app.post("/api/tloz/games", response_model=TlozGame)
+async def create_tloz_game(payload: TlozGameInput, request: Request) -> TlozGame:
+    require_admin_token(request)
+    try:
+        game = await asyncio.to_thread(tloz_repository_or_503(request).create_game, payload)
+    except GameError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    await broadcast_tloz_state(request.app)
+    return game
+
+
+@app.put("/api/tloz/games/{game_id}", response_model=TlozGame)
+async def update_tloz_game(game_id: int, payload: TlozGameInput, request: Request) -> TlozGame:
+    require_admin_token(request)
+    try:
+        game = await asyncio.to_thread(tloz_repository_or_503(request).update_game, game_id, payload)
+    except GameError as error:
+        raise HTTPException(status_code=404 if "no existe" in str(error) else 422, detail=str(error)) from error
+    await broadcast_tloz_state(request.app)
+    return game
+
+
+@app.get("/api/tloz/games/{game_id}/zones", response_model=list[TlozZone])
+async def list_tloz_zones(game_id: int, request: Request) -> list[TlozZone]:
+    require_admin_token(request)
+    return await asyncio.to_thread(tloz_repository_or_503(request).zones, game_id)
+
+
+@app.post("/api/tloz/games/{game_id}/zones", response_model=TlozZone)
+async def create_tloz_zone(game_id: int, payload: TlozZoneInput, request: Request) -> TlozZone:
+    require_admin_token(request)
+    try:
+        return await asyncio.to_thread(tloz_repository_or_503(request).create_zone, game_id, payload)
+    except GameError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@app.put("/api/tloz/zones/{zone_id}", response_model=TlozZone)
+async def update_tloz_zone(zone_id: int, payload: TlozZoneInput, request: Request) -> TlozZone:
+    require_admin_token(request)
+    try:
+        return await asyncio.to_thread(tloz_repository_or_503(request).update_zone, zone_id, payload)
+    except GameError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@app.get("/api/tloz/games/{game_id}/objectives", response_model=list[TlozObjective])
+async def list_tloz_objectives(game_id: int, request: Request) -> list[TlozObjective]:
+    require_admin_token(request)
+    return await asyncio.to_thread(tloz_repository_or_503(request).objectives, game_id)
+
+
+@app.post("/api/tloz/zones/{zone_id}/objectives", response_model=TlozObjective)
+async def create_tloz_objective(zone_id: int, payload: TlozObjectiveInput, request: Request) -> TlozObjective:
+    require_admin_token(request)
+    try:
+        return await asyncio.to_thread(tloz_repository_or_503(request).create_objective, zone_id, payload)
+    except GameError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@app.put("/api/tloz/objectives/{objective_id}", response_model=TlozObjective)
+async def update_tloz_objective(objective_id: int, payload: TlozObjectiveInput, request: Request) -> TlozObjective:
+    require_admin_token(request)
+    try:
+        return await asyncio.to_thread(tloz_repository_or_503(request).update_objective, objective_id, payload)
+    except GameError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@app.put("/api/tloz/current", response_model=TlozOverlayState)
+async def update_tloz_current(payload: TlozCurrentUpdate, request: Request) -> TlozOverlayState:
+    require_admin_token(request)
+    state = await request.app.state.stream_state.get()
+    try:
+        result = await asyncio.to_thread(tloz_repository_or_503(request).update_current, state.category_id, state.twitch_stream_id, payload)
+    except GameError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    await request.app.state.connections.broadcast({"type": "tloz.state", "data": result.model_dump(mode="json")})
+    return result
+
+
 @app.get("/api/pokemon/team", response_model=PokemonTeam)
 async def pokemon_team(request: Request) -> PokemonTeam:
     return await asyncio.to_thread(request.app.state.pokemon_team.get_team)
@@ -557,6 +687,21 @@ async def game_admin() -> FileResponse:
     return FileResponse("app/static/game/admin.html")
 
 
+@app.get("/overlay/tloz", include_in_schema=False)
+async def tloz_overlay() -> FileResponse:
+    return FileResponse("app/static/tloz/overlay.html")
+
+
+@app.get("/overlay/tloz/starting-soon", include_in_schema=False)
+async def tloz_starting_soon_overlay() -> FileResponse:
+    return FileResponse("app/static/tloz/starting-soon.html")
+
+
+@app.get("/admin/tloz", include_in_schema=False)
+async def tloz_admin() -> FileResponse:
+    return FileResponse("app/static/tloz/admin.html")
+
+
 @app.websocket("/ws/overlay")
 async def overlay_socket(websocket: WebSocket) -> None:
     connections: OverlayConnections = app.state.connections
@@ -573,6 +718,7 @@ async def overlay_socket(websocket: WebSocket) -> None:
                 await websocket.send_json({"type": "game.community.snapshot", "data": {}})
             except Exception:
                 logger.exception("Could not initialize the community dashboard socket message")
+        await websocket.send_json({"type": "tloz.state", "data": (await tloz_state(websocket.app, state)).model_dump(mode="json")})
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:

@@ -19,10 +19,11 @@ EVENTSUB_URL = "wss://eventsub.wss.twitch.tv/ws"
 
 
 class EventSubClient:
-    def __init__(self, twitch: TwitchClient, state: StreamStateStore, publish: Callable[[dict], Awaitable[None]], repository: EventRepository | None = None, game_handler: Callable[[str, dict, str], Awaitable[None]] | None = None) -> None:
+    def __init__(self, twitch: TwitchClient, state: StreamStateStore, publish: Callable[[dict], Awaitable[None]], repository: EventRepository | None = None, game_handler: Callable[[str, dict, str], Awaitable[None]] | None = None, state_handler: Callable[[StreamState], Awaitable[None]] | None = None) -> None:
         self.twitch, self.state, self.publish = twitch, state, publish
         self.repository = repository
         self.game_handler = game_handler
+        self.state_handler = state_handler
         self.task: asyncio.Task | None = None
         self.connected = False
         self.subscribed_types: set[str] = set()
@@ -113,6 +114,8 @@ class EventSubClient:
         stream_state = await self.state.update(**changes)
         await self.publish({"type": "event", "event": event_type.removeprefix("channel."), "data": data})
         await self.publish({"type": "stream_state", "data": stream_state.model_dump(mode="json")})
+        if self.state_handler:
+            await self.state_handler(stream_state)
 
     @staticmethod
     def _event_changes(event_type: str, event: dict, received_at: datetime) -> tuple[dict[str, object], dict[str, object]]:
