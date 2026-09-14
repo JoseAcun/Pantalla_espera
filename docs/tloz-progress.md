@@ -37,15 +37,17 @@ Rutas de administración: `GET/POST /api/tloz/games`, `PUT /api/tloz/games/{id}`
 
 ## Browser Sources y layouts
 
-- `http://IP_DE_LA_PI:8010/overlay/tloz` — guía transparente del layout de juego y tarjeta de estado.
+- `http://IP_DE_LA_PI:8010/overlay/tloz` — en un juego con layout 16:9 es una capa transparente compacta: el gameplay ocupa todo OBS y la webcam se coloca por separado.
+- `http://IP_DE_LA_PI:8010/overlay/tloz?position=top-right` — el mismo módulo compacto en una esquina libre. Valores: `top-left`, `top-right`, `bottom-left` (predeterminado) y `bottom-right`.
+- `http://IP_DE_LA_PI:8010/overlay/tloz?position=top-right&mode=minimal` — oculta la etiqueta y consola para escenas con aún menos información fija.
 - `http://IP_DE_LA_PI:8010/overlay/tloz/starting-soon` — tarjeta `Previously in Zelda` para Starting Soon.
 - `http://IP_DE_LA_PI:8010/overlay/brb` — incluye el mismo recap como uno de sus módulos.
 
-Configura la fuente Browser en **1920×1080** en OBS. El overlay no captura vídeo: las cajas punteadas son guías para colocar las fuentes de captura y webcam detrás/debajo de la fuente Browser.
+Configura la fuente Browser en **1920×1080** en OBS. Para 16:9, coloca la captura de juego a lienzo completo y esta Browser Source encima: no dibuja marco, guía ni caja de webcam. Elige la esquina libre según tu cámara mediante `position`; la fuente no reserva ninguna zona para ella. Los layouts no 16:9 conservan sus guías para organizar las fuentes de captura.
 
 | Layout | Uso de las guías |
 | --- | --- |
-| `16_9` | gameplay panorámico principal |
+| `16_9` | capa transparente compacta sobre gameplay panorámico a lienzo completo; sin guía ni reserva de webcam |
 | `4_3` | gameplay retro 4:3 centrado |
 | `handheld` | captura vertical portátil |
 | `ds` | pantalla inferior grande como gameplay; superior secundaria arriba a la izquierda; webcam en el espacio superior derecho |
