@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>STREAM_OS // Presenter Control</title>
+  <link rel="stylesheet" href="/static/presenter/admin.css">
+</head>
+<body>
+  <main class="control-panel">
+    <header>
+      <div><p class="eyebrow">LOCAL PANEL // PRESENTER</p><h1>Control de presentación</h1></div>
+      <span id="connection" class="connection">DESCONECTADO</span>
+    </header>
+    <p class="help">Controla únicamente los módulos internos de <code>/overlay/presenter</code>. No cambia escenas reales de OBS.</p>
+
+    <section class="token-card">
+      <label>Token de administración<input id="token" type="password" autocomplete="off" placeholder="OVERLAY_ADMIN_TOKEN"></label>
+      <button id="connect" type="button">Conectar panel</button>
+      <p id="notice" role="status">El token se usa solo en esta pestaña y no se guarda.</p>
+    </section>
+
+    <section aria-labelledby="on-air-title">
+      <div class="section-heading"><div><p class="eyebrow">EN AIRE</p><h2 id="on-air-title"><span id="on-air-module">IDENTIDAD</span></h2></div><span id="playback-status" class="status-pill">PREDETERMINADO</span></div>
+      <div id="module-buttons" class="module-buttons" aria-label="Seleccionar módulo">
+        <button type="button" data-module="intro">1 <span>Identidad</span></button>
+        <button type="button" data-module="community">2 <span>Comunidad</span></button>
+        <button type="button" data-module="tloz">3 <span>Proyecto TLOZ</span></button>
+        <button type="button" data-module="cta">4 <span>Cierre / CTA</span></button>
+      </div>
+      <div class="transport">
+        <button id="previous" type="button" class="secondary">← Anterior</button>
+        <button id="toggle-rotation" type="button" class="primary">Iniciar rotación</button>
+        <button id="next" type="button" class="secondary">Siguiente →</button>
+      </div>
+    </section>
+
+    <section>
+      <p class="eyebrow">COMPOSICIÓN</p><h2>Cámara y ritmo</h2>
+      <div class="control-grid">
+        <fieldset><legend>Zona libre para cámara</legend><div id="camera-buttons" class="segmented"><button type="button" data-camera="left">Izquierda</button><button type="button" data-camera="right">Derecha</button><button type="button" data-camera="none">Ninguna</button></div></fieldset>
+        <label class="duration">Duración por módulo <output id="duration-output" for="duration">15 s</output><input id="duration" type="range" min="5" max="60" step="1" value="15"></label>
+      </div>
+    </section>
+
+    <section>
+      <p class="eyebrow">TEXTO EVERGREEN</p><h2>Presentación</h2>
+      <div class="copy-controls"><label>Nombre del canal<input id="channel-name" maxlength="48" placeholder="Se usa el nombre de Twitch si está vacío"></label><label>Horario / mensaje<input id="schedule" maxlength="120" placeholder="Sígueme para saber cuándo continuamos."></label></div>
+      <button id="save-copy" type="button" class="primary wide">Actualizar texto en Presenter</button>
+    </section>
+  </main>
+  <script src="/static/presenter/admin.js"></script>
+</body>
+</html>

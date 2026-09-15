@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>STREAM_OS // Presenter</title>
+  <link rel="stylesheet" href="/static/presenter/styles.css">
+</head>
+<body>
+  <main id="presenter" class="presenter camera-right mode-trailer" aria-live="polite">
+    <aside class="camera-safe" aria-label="Área reservada para la cámara"></aside>
+    <section class="content-frame">
+      <header class="topline">
+        <span class="brand">STREAM_OS</span>
+        <span id="connection" class="connection">SYNCING</span>
+      </header>
+
+      <section class="module active" data-module="intro">
+        <p class="eyebrow">CANAL // EN DIRECTO</p>
+        <h1 id="channel-name">STREAMER</h1>
+        <p id="stream-status" class="lead">Una transmisión a la vez.</p>
+        <dl class="signal-row">
+          <div><dt>ESTADO</dt><dd id="live-status">AFK</dd></div>
+          <div><dt>CATEGORÍA</dt><dd id="stream-category">SIN CATEGORÍA</dd></div>
+          <div><dt>ESPECTADORES</dt><dd id="viewer-count">—</dd></div>
+        </dl>
+      </section>
+
+      <section class="module" data-module="community" hidden>
+        <p class="eyebrow">COMUNIDAD // PROGRESO COMPARTIDO</p>
+        <h2>Las aventuras se construyen en el chat.</h2>
+        <p id="community-summary" class="lead">Esperando señales de la comunidad.</p>
+        <div id="community-cards" class="card-grid"></div>
+      </section>
+
+      <section class="module" data-module="tloz" hidden>
+        <p class="eyebrow">PROYECTO // THE LEGEND OF ZELDA</p>
+        <h2 id="tloz-title">Archivo de aventura</h2>
+        <p id="tloz-summary" class="lead">Una cronología en construcción, un directo a la vez.</p>
+        <ol id="tloz-timeline" class="timeline" aria-label="Cronología de Zelda"></ol>
+      </section>
+
+      <section class="module" data-module="cta" hidden>
+        <p class="eyebrow">PRÓXIMA PARTIDA // ÚNETE</p>
+        <h2>El siguiente capítulo empieza en el chat.</h2>
+        <p id="schedule" class="lead">Sígueme para saber cuándo continuamos.</p>
+        <div class="cta-command"><span>&gt;</span> !join <small>para comenzar tu aventura</small></div>
+      </section>
+
+      <footer class="module-footer">
+        <span id="module-indicator">01 / 04 · IDENTIDAD</span>
+        <span id="mode-indicator">TRAILER · 60s</span>
+      </footer>
+    </section>
+  </main>
+  <script src="/static/presenter/app.js"></script>
+</body>
+</html>

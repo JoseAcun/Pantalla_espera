@@ -40,10 +40,14 @@ Rutas de administración: `GET/POST /api/tloz/games`, `PUT /api/tloz/games/{id}`
 - `http://IP_DE_LA_PI:8010/overlay/tloz` — en un juego con layout 16:9 es una capa transparente compacta: el gameplay ocupa todo OBS y la webcam se coloca por separado.
 - `http://IP_DE_LA_PI:8010/overlay/tloz?position=top-right` — el mismo módulo compacto en una esquina libre. Valores: `top-left`, `top-right`, `bottom-left` (predeterminado) y `bottom-right`.
 - `http://IP_DE_LA_PI:8010/overlay/tloz?position=top-right&mode=minimal` — oculta la etiqueta y consola para escenas con aún menos información fija.
+- `http://IP_DE_LA_PI:8010/overlay/tloz?position=top-right&cycle=timeline` — mantiene el módulo compacto (o `minimal`) y, cada 60 segundos, muestra durante 10 segundos una franja inferior transparente con la cronología y el juego actual destacado.
+- `http://IP_DE_LA_PI:8010/overlay/tloz?mode=timeline` — muestra solamente la franja de cronología; útil como Browser Source separada. En este modo `position` no aplica.
 - `http://IP_DE_LA_PI:8010/overlay/tloz/starting-soon` — tarjeta `Previously in Zelda` para Starting Soon.
 - `http://IP_DE_LA_PI:8010/overlay/brb` — incluye el mismo recap como uno de sus módulos.
 
 Configura la fuente Browser en **1920×1080** en OBS. Para 16:9, coloca la captura de juego a lienzo completo y esta Browser Source encima: no dibuja marco, guía ni caja de webcam. Elige la esquina libre según tu cámara mediante `position`; la fuente no reserva ninguna zona para ella. Los layouts no 16:9 conservan sus guías para organizar las fuentes de captura.
+
+La rotación es opcional y exclusiva de 16:9. `cycle=timeline` oculta temporalmente la tarjeta compacta y luego vuelve al estado elegido (`compact` o `minimal`). Si hace falta, puedes ajustar los segundos dentro de límites seguros: `cycle_every=30..300` (60 por defecto) y `cycle_for=5..20` (10 por defecto), por ejemplo `?position=bottom-left&mode=minimal&cycle=timeline&cycle_every=90&cycle_for=8`. `mode=timeline` ignora el ciclo y deja la cronología fija; 4:3, Handheld, DS y 3DS ignoran ambas opciones.
 
 | Layout | Uso de las guías |
 | --- | --- |

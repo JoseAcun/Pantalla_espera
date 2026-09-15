@@ -36,6 +36,7 @@ from app.game.progression import ProgressionConfig
 from app.game.service import GameError
 from app.models import StreamState, SubscriptionEvent
 from app.pokemon import MAX_TEAM_SIZE, PokeApiClient, PokemonError, PokemonTeam, PokemonTeamStore
+from app.presenter import PresenterControl, PresenterControlStore, PresenterControlUpdate
 from app.state import StreamStateStore
 from app.twitch import TwitchClient, TwitchError, create_oauth_state
 from app.tloz.models import TlozCurrentUpdate, TlozGame, TlozGameInput, TlozObjective, TlozObjectiveInput, TlozOverlayState, TlozZone, TlozZoneInput
@@ -141,6 +142,13 @@ async def broadcast_tloz_state(app: FastAPI, state: StreamState | None = None) -
         logger.exception("Could not refresh TLOZ overlay state")
 
 
+async def broadcast_presenter_control(app: FastAPI, control: PresenterControl | None = None) -> None:
+    """Notify the isolated presenter Browser Sources without affecting other overlays."""
+    payload = control or await app.state.presenter_control.get()
+    if payload.remote_active:
+        await app.state.connections.broadcast({"type": "presenter.control", "data": payload.model_dump(mode="json")})
+
+
 def require_admin_token(request: Request) -> None:
     expected = get_settings().overlay_admin_token
     supplied = request.headers.get("X-Overlay-Admin-Token", "")
@@ -164,6 +172,7 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     app.state.stream_state = StreamStateStore(initial_state())
     app.state.connections = OverlayConnections()
+    app.state.presenter_control = PresenterControlStore()
     app.state.twitch = TwitchClient(settings)
     app.state.pokemon_team = PokemonTeamStore(settings.pokemon_data_dir)
     await asyncio.to_thread(app.state.pokemon_team.initialize)
@@ -232,6 +241,20 @@ async def health() -> dict[str, str]:
 @app.get("/api/state", response_model=StreamState)
 async def get_state() -> StreamState:
     return await app.state.stream_state.get()
+
+
+@app.get("/api/presenter/control", response_model=PresenterControl)
+async def get_presenter_control(request: Request) -> PresenterControl:
+    require_admin_token(request)
+    return await request.app.state.presenter_control.get()
+
+
+@app.put("/api/presenter/control", response_model=PresenterControl)
+async def update_presenter_control(payload: PresenterControlUpdate, request: Request) -> PresenterControl:
+    require_admin_token(request)
+    control = await request.app.state.presenter_control.update(payload)
+    await broadcast_presenter_control(request.app, control)
+    return control
 
 
 @app.get("/auth/twitch/start", include_in_schema=False)
@@ -667,6 +690,17 @@ async def stream_overlay() -> FileResponse:
     return FileResponse("app/static/brb/stream.html")
 
 
+@app.get("/overlay/presenter", include_in_schema=False)
+async def presenter_overlay() -> FileResponse:
+    """Standalone read-only layout for trailers and chat presentation."""
+    return FileResponse("app/static/presenter/index.html")
+
+
+@app.get("/admin/presenter", include_in_schema=False)
+async def presenter_admin() -> FileResponse:
+    return FileResponse("app/static/presenter/admin.html")
+
+
 @app.get("/overlay/pokemon", include_in_schema=False)
 async def pokemon_overlay() -> FileResponse:
     return FileResponse("app/static/pokemon/overlay.html")
@@ -719,6 +753,7 @@ async def overlay_socket(websocket: WebSocket) -> None:
             except Exception:
                 logger.exception("Could not initialize the community dashboard socket message")
         await websocket.send_json({"type": "tloz.state", "data": (await tloz_state(websocket.app, state)).model_dump(mode="json")})
+        await broadcast_presenter_control(websocket.app)
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:

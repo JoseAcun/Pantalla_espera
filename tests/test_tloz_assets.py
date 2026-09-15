@@ -27,7 +27,17 @@ class TlozAssetTests(unittest.TestCase):
         javascript = (ROOT / "app/static/tloz/overlay.js").read_text(encoding="utf-8")
         css = (ROOT / "app/static/tloz/styles.css").read_text(encoding="utf-8")
         self.assertIn("'top-left','top-right','bottom-left','bottom-right'", javascript)
-        self.assertIn("query.get('mode')==='minimal'", javascript)
+        self.assertIn("requestedMode==='minimal'", javascript)
         self.assertIn(".layout-16_9.position-top-left .status-card", css)
         self.assertIn(".layout-16_9.position-bottom-right .status-card", css)
         self.assertIn(".layout-16_9.mode-minimal", css)
+
+    def test_16_by_9_has_opt_in_timeline_cycle_and_dedicated_timeline_mode(self) -> None:
+        javascript = (ROOT / "app/static/tloz/overlay.js").read_text(encoding="utf-8")
+        css = (ROOT / "app/static/tloz/styles.css").read_text(encoding="utf-8")
+        self.assertIn("query.get('cycle')==='timeline'", javascript)
+        self.assertIn("requestedMode==='timeline'", javascript)
+        self.assertIn("cycleEveryMs", javascript)
+        self.assertIn("cycleForMs", javascript)
+        self.assertIn(".layout-16_9.show-timeline .status-card{display:none}", css)
+        self.assertIn(".layout-16_9.show-timeline .timeline{position:absolute;display:flex", css)
